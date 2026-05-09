@@ -11,7 +11,9 @@ import httpx
 SSDP_ADDR = "239.255.255.250"
 SSDP_PORT = 1900
 SSDP_MX = 3
-SSDP_ST = "urn:samsung.com:device:RemoteControlReceiver:1"
+# 2024 Frames don't advertise the narrow RemoteControlReceiver ST, so we ask
+# for everything on the network and filter responses by SERVER header.
+SSDP_ST = "ssdp:all"
 
 MSEARCH = (
     f"M-SEARCH * HTTP/1.1\r\n"
@@ -30,9 +32,17 @@ class DiscoveredTV:
     mac: str | None = None
 
 
-def _parse_location(packet: bytes) -> str | None:
-    match = re.search(rb"LOCATION:\s*(\S+)", packet, re.IGNORECASE)
-    return match.group(1).decode() if match else None
+def _parse_header(packet: bytes, name: str) -> str | None:
+    match = re.search(
+        rb"^" + name.encode() + rb":\s*([^\r\n]+)",
+        packet,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    return match.group(1).decode(errors="replace").strip() if match else None
+
+
+def _is_samsung(server_header: str | None) -> bool:
+    return bool(server_header and "samsung" in server_header.lower())
 
 
 def _is_frame_model(model_name: str) -> bool:
@@ -57,29 +67,24 @@ def discover(timeout: float = 4.0) -> List[DiscoveredTV]:
     sock.settimeout(timeout)
     sock.sendto(MSEARCH, (SSDP_ADDR, SSDP_PORT))
 
-    found_hosts: set[str] = set()
-    locations: list[str] = []
+    samsung_hosts: set[str] = set()
     try:
         while True:
             data, addr = sock.recvfrom(8192)
-            if addr[0] in found_hosts:
+            if addr[0] in samsung_hosts:
                 continue
-            found_hosts.add(addr[0])
-            loc = _parse_location(data)
-            if loc:
-                locations.append(loc)
+            if _is_samsung(_parse_header(data, "SERVER")):
+                samsung_hosts.add(addr[0])
     except socket.timeout:
         pass
     finally:
         sock.close()
 
     results: list[DiscoveredTV] = []
-    for loc in locations:
-        host_match = re.search(r"://([^:/]+)", loc)
-        if not host_match:
-            continue
-        host_addr = host_match.group(1)
+    for host_addr in samsung_hosts:
         model, mac = _fetch_device_info(host_addr)
+        if not model:
+            continue  # speaks SSDP-as-Samsung but isn't a TV (NAS, soundbar, …)
         results.append(
             DiscoveredTV(
                 host=host_addr,
