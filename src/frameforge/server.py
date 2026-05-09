@@ -15,6 +15,8 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__
@@ -286,6 +288,16 @@ def theme_detail(slug: str, with_expansion: bool = False) -> ThemeDetail:
     )
 
 
+@app.get("/api/themes/{slug}/images/{filename}")
+def serve_image(slug: str, filename: str) -> FileResponse:
+    """Raw image bytes for the theme cards' mosaic and the detail grid."""
+    cfg = Config()
+    p = cfg.theme_dir(slug) / filename
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(p)
+
+
 @app.get("/api/themes/{slug}/images/{filename}/inspect", response_model=InspectPayload)
 def inspect_image(slug: str, filename: str) -> InspectPayload:
     """Image inspect side sheet contents."""
@@ -436,6 +448,14 @@ async def ws_status(ws: WebSocket) -> None:
             await ws.receive_text()  # keep-alive; we don't expect inbound
     except WebSocketDisconnect:
         broker.disconnect(ws)
+
+
+# ----- Static frontend mount -------------------------------------------------
+# Must come AFTER all /api and /ws routes so they take precedence.
+
+_STATIC_DIR = Path(__file__).parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
 
 
 # ----- Entry point -----------------------------------------------------------

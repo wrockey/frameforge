@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FrameForge</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#/themes">
+      <span class="brand-mark">◇</span>
+      <span class="brand-name">FrameForge</span>
+    </a>
+
+    <nav class="primary-nav" aria-label="Primary">
+      <a href="#/themes" data-nav="themes">Themes</a>
+      <a href="#/tv" data-nav="tv">TV</a>
+      <a href="#/schedule" data-nav="schedule">Schedule</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
+    </nav>
+
+    <button class="status-chip" id="status-chip" type="button" aria-haspopup="dialog">
+      <span class="status-dot" data-state="idle" id="status-dot"></span>
+      <span class="status-label" id="status-label">Idle</span>
+    </button>
+
+    <div class="status-popover hidden" id="status-popover" role="dialog" aria-label="Recent status">
+      <div class="status-popover-title">Recent activity</div>
+      <ul class="status-history" id="status-history"></ul>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Onboarding flow ------------------------------------------------- -->
+    <section class="route route-onboarding hidden" data-route="onboarding">
+      <div class="onboarding-shell">
+        <ol class="onboarding-steps" id="onboarding-steps">
+          <li data-step="1">Welcome</li>
+          <li data-step="2">Find your TV</li>
+          <li data-step="3">Pair</li>
+          <li data-step="4">API key</li>
+        </ol>
+
+        <!-- Step 1: Welcome -->
+        <div class="onboarding-pane" data-step-pane="1">
+          <h1 class="display">Welcome to FrameForge.</h1>
+          <p class="lede">
+            Themed art for your Samsung Frame TV, generated locally and refreshed
+            on a schedule. Pick a theme, expand it into a batch, push to the wall.
+          </p>
+          <p class="onboarding-meta">No accounts. No cloud sync. Your library lives in <code>~/Pictures/FrameForge</code>.</p>
+          <div class="onboarding-actions">
+            <button class="btn btn-primary" data-onboarding-next>Begin</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Find TV -->
+        <div class="onboarding-pane hidden" data-step-pane="2">
+          <h1 class="display">Find your TV.</h1>
+          <p class="lede">Looking on your local network for a Samsung Frame.</p>
+
+          <div class="discover-pane">
+            <div class="discover-scanner" id="discover-scanner">
+              <div class="scanner-pulse"></div>
+              <div class="scanner-label">Looking for your Frame…</div>
+            </div>
+            <div class="discover-results hidden" id="discover-results"></div>
+          </div>
+
+          <div class="onboarding-actions">
+            <button class="btn btn-ghost" id="discover-rescan">Search again</button>
+            <button class="btn btn-link" id="discover-manual">enter the IP manually</button>
+            <button class="btn btn-primary hidden" id="discover-confirm">This is the right one</button>
+          </div>
+
+          <div class="manual-ip hidden" id="manual-ip">
+            <label for="manual-ip-input">TV IP address</label>
+            <input id="manual-ip-input" type="text" placeholder="192.168.1.100" />
+            <button class="btn btn-secondary" id="manual-ip-go">Continue</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Pair -->
+        <div class="onboarding-pane hidden" data-step-pane="3">
+          <h1 class="display">Accept the pairing prompt on your TV.</h1>
+          <p class="lede">Grab the remote. We'll wait.</p>
+          <div class="pair-countdown">
+            <div class="pair-ring" id="pair-ring"><span id="pair-countdown-text">30</span></div>
+          </div>
+          <p class="onboarding-meta" id="pair-status">Waiting for confirmation…</p>
+          <div class="onboarding-actions">
+            <button class="btn btn-ghost" data-onboarding-back>Back</button>
+            <button class="btn btn-primary hidden" id="pair-continue">Continue</button>
+          </div>
+        </div>
+
+        <!-- Step 4: API key -->
+        <div class="onboarding-pane hidden" data-step-pane="4">
+          <h1 class="display">Your xAI API key.</h1>
+          <p class="lede">
+            FrameForge generates images via the xAI Imagine API. Your key stays on
+            this Mac — stored in the macOS Keychain, never on a server.
+          </p>
+          <div class="key-input">
+            <label for="api-key">XAI_API_KEY</label>
+            <div class="key-input-row">
+              <input id="api-key" type="password" placeholder="xai-…" autocomplete="off" />
+              <button class="btn btn-ghost btn-small" id="key-toggle">show</button>
+            </div>
+            <p class="key-storage">Stored at: <code>~/Library/Keychains</code> · <code>com.frameforge.app</code></p>
+          </div>
+          <div class="onboarding-actions">
+            <button class="btn btn-ghost" data-onboarding-back>Back</button>
+            <button class="btn btn-secondary" id="key-test">Test connection</button>
+            <button class="btn btn-primary" id="key-finish">Finish setup</button>
+          </div>
+          <p class="key-result" id="key-result"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Themes screen --------------------------------------------------- -->
+    <section class="route route-themes hidden" data-route="themes">
+      <div class="screen-header">
+        <h1 class="display">Themes</h1>
+        <button class="btn btn-primary" id="new-theme">+ New theme</button>
+      </div>
+
+      <div class="theme-grid" id="theme-grid"></div>
+
+      <p class="empty-state hidden" id="theme-empty">
+        Nothing here yet. Tap <em>+ New theme</em> to generate your first batch.
+      </p>
+    </section>
+
+    <!-- New-theme sheet ------------------------------------------------- -->
+    <div class="sheet-backdrop hidden" id="new-theme-sheet">
+      <div class="sheet" role="dialog" aria-label="New theme">
+        <h2 class="sheet-title">New theme</h2>
+        <label for="new-theme-input">Theme</label>
+        <input id="new-theme-input" type="text" placeholder='e.g. "vintage pulp fantasy"' />
+        <label for="new-theme-count">Image count <span id="new-theme-count-display">30</span></label>
+        <input id="new-theme-count" type="range" min="2" max="60" value="30" />
+        <div class="sheet-actions">
+          <button class="btn btn-ghost" id="new-theme-cancel">Cancel</button>
+          <button class="btn btn-primary" id="new-theme-go">Generate</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Theme detail ---------------------------------------------------- -->
+    <section class="route route-theme-detail hidden" data-route="theme-detail">
+      <a class="back-link" href="#/themes">← Themes</a>
+      <div class="detail-header">
+        <div>
+          <h1 class="display" id="detail-title"></h1>
+          <p class="meta-line" id="detail-meta"></p>
+        </div>
+        <span class="pill pill-on-tv hidden" id="detail-on-tv-pill">ON TV</span>
+      </div>
+
+      <div class="detail-actions">
+        <button class="btn btn-primary" id="detail-push">Push to TV</button>
+        <button class="btn btn-secondary" id="detail-regenerate">Regenerate batch</button>
+        <button class="btn btn-ghost btn-danger" id="detail-delete">Delete theme</button>
+      </div>
+
+      <details class="expansion-panel" id="expansion-panel">
+        <summary>
+          <span class="chev"></span>
+          <span class="expansion-summary-text">Prompt expansion</span>
+          <span class="expansion-summary-meta" id="expansion-summary-meta"></span>
+        </summary>
+        <div class="expansion-body" id="expansion-body">
+          <p class="onboarding-meta">Loading…</p>
+        </div>
+      </details>
+
+      <div class="image-grid" id="image-grid"></div>
+    </section>
+
+    <!-- TV screen ------------------------------------------------------- -->
+    <section class="route route-tv hidden" data-route="tv">
+      <h1 class="display">TV</h1>
+
+      <div class="tv-card" id="tv-card"></div>
+
+      <h2 class="section-title">Slideshow</h2>
+      <div class="slideshow-settings">
+        <div class="setting-block">
+          <label>Minutes per image</label>
+          <div class="picker-row" id="minutes-picker">
+            <button data-value="5">5</button>
+            <button data-value="15">15</button>
+            <button data-value="30" class="selected">30</button>
+            <button data-value="60">60</button>
+            <button data-value="180">3h</button>
+            <button data-value="360">6h</button>
+            <button data-value="720">12h</button>
+            <button data-value="1440">24h</button>
+          </div>
+        </div>
+
+        <div class="setting-block">
+          <label>Matte style</label>
+          <div class="swatch-row" id="matte-picker"></div>
+        </div>
+
+        <div class="setting-block">
+          <label>Matte color</label>
+          <div class="swatch-row" id="matte-color-picker"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Schedule screen ------------------------------------------------- -->
+    <section class="route route-schedule hidden" data-route="schedule">
+      <div class="screen-header">
+        <h1 class="display">Schedule</h1>
+        <button class="btn btn-primary" id="new-schedule">+ New schedule</button>
+      </div>
+
+      <div class="schedule-roadmap-banner">
+        <strong>Roadmap.</strong> Schedule CRUD is wired to launchd and ships in v0.2. Below is the visual with mock entries.
+      </div>
+
+      <div class="week-calendar" id="week-calendar"></div>
+
+      <h2 class="section-title">Active schedules</h2>
+      <ul class="schedule-list" id="schedule-list"></ul>
+    </section>
+
+    <!-- Settings screen ------------------------------------------------- -->
+    <section class="route route-settings hidden" data-route="settings">
+      <h1 class="display">Settings</h1>
+
+      <article class="settings-card" id="api-keys-card">
+        <h2>API Keys</h2>
+        <div class="settings-row">
+          <span class="settings-label">xAI API Key</span>
+          <span class="settings-value mono" id="api-key-status">•••• •••• stored</span>
+          <button class="btn btn-ghost btn-small">Replace</button>
+        </div>
+        <p class="settings-help">Stored in macOS Keychain · <code>com.frameforge.app</code></p>
+      </article>
+
+      <article class="settings-card">
+        <h2>Library</h2>
+        <div class="settings-row">
+          <span class="settings-label">Location</span>
+          <span class="settings-value mono" id="library-location">~/Pictures/FrameForge</span>
+          <button class="btn btn-ghost btn-small">Change</button>
+        </div>
+      </article>
+
+      <article class="settings-card" id="image-gen-card">
+        <h2>Image generation</h2>
+        <div class="settings-row">
+          <span class="settings-label">Image model</span>
+          <span class="settings-value mono" id="setting-image-model"></span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Text model (expansion)</span>
+          <span class="settings-value mono" id="setting-text-model"></span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Resolution</span>
+          <span class="settings-value mono" id="setting-resolution"></span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Aspect ratio</span>
+          <span class="settings-value mono" id="setting-aspect"></span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Default count</span>
+          <span class="settings-value mono" id="setting-count"></span>
+        </div>
+      </article>
+
+      <article class="settings-card">
+        <h2>Advanced</h2>
+        <label class="settings-toggle">
+          <input type="checkbox" id="setting-pin-versions" />
+          <span>Pin model versions in sidecars</span>
+        </label>
+        <label class="settings-toggle">
+          <input type="checkbox" id="setting-save-provenance" checked />
+          <span>Save full provenance JSON beside every image</span>
+        </label>
+      </article>
+
+      <article class="settings-card">
+        <h2>About</h2>
+        <div class="settings-row">
+          <span class="settings-label">Version</span>
+          <span class="settings-value mono" id="about-version">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">License</span>
+          <span class="settings-value">MIT</span>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <!-- Image inspect side sheet -->
+  <aside class="inspect-sheet hidden" id="inspect-sheet" aria-label="Inspect image">
+    <button class="inspect-close" id="inspect-close" aria-label="Close inspect">×</button>
+    <div class="inspect-image" id="inspect-image"></div>
+
+    <div class="inspect-section">
+      <div class="eyebrow">PROMPT</div>
+      <p class="display-serif" id="inspect-prompt"></p>
+    </div>
+
+    <div class="inspect-section">
+      <div class="eyebrow">PROVENANCE <span class="mono caps" id="inspect-provenance-name"></span></div>
+      <pre class="json-block" id="inspect-json"></pre>
+    </div>
+
+    <div class="inspect-pills">
+      <span class="pill" id="inspect-pill-on-tv">ON TV</span>
+      <span class="pill" id="inspect-pill-regen">REGENERATED 0×</span>
+    </div>
+
+    <div class="inspect-actions">
+      <button class="btn btn-secondary">Regenerate this image</button>
+      <button class="btn btn-ghost btn-danger">Remove from library</button>
+    </div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>
