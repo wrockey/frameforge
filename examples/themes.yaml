@@ -1,0 +1,17 @@
+themes:
+  - name: Vintage Pulp Fantasy
+    prompt: vintage pulp fantasy
+  - name: Dutch Masters
+    prompt: Dutch Golden Age master paintings, chiaroscuro, oil on canvas
+  - name: Studio Ghibli Skies
+    prompt: Studio Ghibli style cloudscapes and pastoral landscapes
+  - name: Bauhaus Geometry
+    prompt: Bauhaus geometric compositions, primary colors, flat shapes
+  - name: Ansel Adams Yosemite
+    prompt: black and white large-format landscape photography in the Ansel Adams tradition
+  - name: Art Deco Travel Posters
+    prompt: 1930s art deco travel posters with bold typography areas left blank
+  - name: Hayao Miyazaki Forests
+    prompt: lush forest scenes in the style of Hayao Miyazaki
+  - name: Edward Hopper Americana
+    prompt: Edward Hopper style American urban and rural scenes, warm window light
