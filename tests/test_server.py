@@ -1,6 +1,5 @@
 """Server endpoint tests with a fixture library on disk."""
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -173,3 +172,202 @@ def test_settings_endpoint(app_with_fixture):
     assert s["text_model"] == "grok-4.3"
     assert s["target_count"] == 30
     assert s["save_provenance"] is True
+
+
+# ----- TV art management ------------------------------------------------------
+
+
+class FakeFrameTVClient:
+    """Stands in for FrameTVClient; state lives on the class between requests."""
+
+    art_on_tv: list[dict] = []
+    current: str | None = None
+    upload_counter: int = 100
+    deleted: list[str] = []
+    selected: list[str] = []
+    slideshow_minutes: list[int] = []
+
+    @classmethod
+    def reset(cls):
+        cls.art_on_tv = []
+        cls.current = None
+        cls.upload_counter = 100
+        cls.deleted = []
+        cls.selected = []
+        cls.slideshow_minutes = []
+
+    def __init__(self, cfg, host):
+        self.cfg = cfg
+        self.host = host
+
+    def list_art(self):
+        return [dict(i) for i in type(self).art_on_tv]
+
+    def get_current_art(self):
+        return type(self).current
+
+    def get_thumbnail(self, content_id):
+        return b"\xff\xd8fake-jpeg"
+
+    def upload_batch(self, library, theme_slug, image_paths, matte="x", portrait_matte="x"):
+        cls = type(self)
+        ids = []
+        for p in image_paths:
+            cls.upload_counter += 1
+            cid = f"MY_F{cls.upload_counter}"
+            cls.art_on_tv.append({"content_id": cid})
+            library.record_upload(cid, p, theme_slug, "2026-05-09T00:00:00Z")
+            ids.append(cid)
+        return ids
+
+    def delete_art(self, content_ids):
+        cls = type(self)
+        cls.deleted.extend(content_ids)
+        cls.art_on_tv = [
+            i for i in cls.art_on_tv if i["content_id"] not in content_ids
+        ]
+        return list(content_ids)
+
+    def select_art(self, content_id):
+        type(self).selected.append(content_id)
+
+    def start_slideshow(self, minutes=30):
+        type(self).slideshow_minutes.append(minutes)
+
+
+@pytest.fixture
+def app_with_tv(tmp_path, monkeypatch):
+    """TestClient with a fixture library, a configured host, and a fake TV."""
+    lib_root = _build_fixture_library(tmp_path)
+    monkeypatch.setenv("FRAMEFORGE_LIBRARY", str(lib_root))
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
+    monkeypatch.setenv("FRAMEFORGE_TV_HOST", "192.0.2.10")
+    import importlib
+
+    import frameforge.server as server_mod
+
+    importlib.reload(server_mod)
+    FakeFrameTVClient.reset()
+    server_mod._thumb_cache.clear()
+    monkeypatch.setattr(server_mod, "FrameTVClient", FakeFrameTVClient)
+    return TestClient(server_mod.app), lib_root
+
+
+def test_tv_art_no_host_falls_back_to_cache(app_with_fixture):
+    client, _ = app_with_fixture
+    r = client.get("/api/tv/art")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["connected"] is False
+    assert body["source"] == "cache"
+    assert body["items"] == []
+
+
+def test_tv_art_reconciles_db_with_tv(app_with_tv):
+    """Stale DB rows are pruned; untracked TV art shows up unmatched."""
+    client, lib_root = app_with_tv
+    from frameforge.config import Config
+    from frameforge.library import Library
+
+    library = Library(Config())
+    img1 = lib_root / "vintage_pulp_fantasy" / "img_0001.png"
+    img2 = lib_root / "vintage_pulp_fantasy" / "img_0002.png"
+    # A: tracked and still on TV. B: tracked but gone from TV (deleted via remote).
+    library.record_upload("MY_F0001", img1, "vintage_pulp_fantasy", "2026-05-08T00:00:00Z")
+    library.record_upload("MY_F0002", img2, "vintage_pulp_fantasy", "2026-05-08T00:00:00Z")
+    # TV holds A plus C, which FrameForge never uploaded.
+    FakeFrameTVClient.art_on_tv = [
+        {"content_id": "MY_F0001"},
+        {"content_id": "MY_F9999", "image_date": "2026-01-01"},
+    ]
+    FakeFrameTVClient.current = "MY_F0001"
+
+    r = client.get("/api/tv/art")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["connected"] is True
+    assert body["source"] == "tv"
+    assert body["current_content_id"] == "MY_F0001"
+    by_id = {i["content_id"]: i for i in body["items"]}
+    assert set(by_id) == {"MY_F0001", "MY_F9999"}
+    matched = by_id["MY_F0001"]
+    assert matched["matched"] is True
+    assert matched["theme_slug"] == "vintage_pulp_fantasy"
+    assert matched["filename"] == "img_0001.png"
+    assert matched["is_current"] is True
+    assert matched["thumbnail_url"].startswith("/api/themes/")
+    unmatched = by_id["MY_F9999"]
+    assert unmatched["matched"] is False
+    assert unmatched["thumbnail_url"] == "/api/tv/art/MY_F9999/thumbnail"
+    # B was pruned from the DB
+    assert library.tv_content_id(img2) is None
+
+
+def test_tv_art_thumbnail_served_and_cached(app_with_tv):
+    client, _ = app_with_tv
+    r = client.get("/api/tv/art/MY_F9999/thumbnail")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert r.content == b"\xff\xd8fake-jpeg"
+
+
+def test_tv_upload_selected(app_with_tv):
+    client, lib_root = app_with_tv
+    r = client.post(
+        "/api/tv/art/upload",
+        json={
+            "items": [
+                {"slug": "vintage_pulp_fantasy", "filename": "img_0001.png"},
+                {"slug": "vintage_pulp_fantasy", "filename": "img_0003.png"},
+            ],
+            "matte": "shadowbox",
+            "matte_color": "polar",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2
+    # Uploads now visible on the TV list and flagged in the theme detail
+    art = client.get("/api/tv/art").json()
+    assert {i["content_id"] for i in art["items"]} == set(body["uploaded"])
+    detail = client.get("/api/themes/vintage_pulp_fantasy").json()
+    on_tv = {t["filename"]: t for t in detail["images"] if t["on_tv"]}
+    assert set(on_tv) == {"img_0001.png", "img_0003.png"}
+    assert on_tv["img_0001.png"]["content_id"] in body["uploaded"]
+
+
+def test_tv_upload_missing_image_404(app_with_tv):
+    client, _ = app_with_tv
+    r = client.post(
+        "/api/tv/art/upload",
+        json={"items": [{"slug": "vintage_pulp_fantasy", "filename": "nope.png"}]},
+    )
+    assert r.status_code == 404
+
+
+def test_tv_delete_selected(app_with_tv):
+    client, _ = app_with_tv
+    up = client.post(
+        "/api/tv/art/upload",
+        json={"items": [{"slug": "vintage_pulp_fantasy", "filename": "img_0001.png"}]},
+    ).json()
+    cid = up["uploaded"][0]
+    r = client.post("/api/tv/art/delete", json={"content_ids": [cid]})
+    assert r.status_code == 200
+    assert r.json()["removed"] == [cid]
+    assert r.json()["failed"] == []
+    # Gone from both the TV list and the theme detail flags
+    art = client.get("/api/tv/art").json()
+    assert art["items"] == []
+    detail = client.get("/api/themes/vintage_pulp_fantasy").json()
+    assert all(not t["on_tv"] for t in detail["images"])
+
+
+def test_tv_select_and_slideshow(app_with_tv):
+    client, _ = app_with_tv
+    r = client.post("/api/tv/art/select", json={"content_id": "MY_F0001"})
+    assert r.status_code == 200
+    assert FakeFrameTVClient.selected == ["MY_F0001"]
+    r = client.post("/api/tv/slideshow", json={"minutes": 60})
+    assert r.status_code == 200
+    assert FakeFrameTVClient.slideshow_minutes == [60]

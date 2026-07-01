@@ -105,6 +105,20 @@ Use `launchd`. Example plist refreshing weekly:
 Save to `~/Library/LaunchAgents/com.genstation.frameforge.plist`, then
 `launchctl load` it.
 
+## Managing what's on the TV
+
+The web UI's **TV** screen is a two-panel manager:
+
+- **On the TV** — the art actually stored on the Frame, read live from the
+  TV (including pieces uploaded by other apps). Select images and remove
+  them from the TV, or click *Show now* to display one immediately.
+- **Your library** — every generated image, filterable by theme. Select the
+  ones you want on the wall and upload them in one click; images already on
+  the TV are marked.
+
+Each theme's detail grid also has a per-image **+ / −** toggle to send a
+single image to the TV or pull it off.
+
 ## Roadmap
 
 - v0.2: image regenerate-one, delete-image, schedule CRUD endpoints

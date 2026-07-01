@@ -139,6 +139,14 @@ class Library:
         )
         self._conn.commit()
 
+    def tv_content_id(self, local_path: Path) -> str | None:
+        """content_id this local image was uploaded under, or None."""
+        row = self._conn.execute(
+            "SELECT content_id FROM tv_uploads WHERE local_path = ? LIMIT 1",
+            (str(local_path),),
+        ).fetchone()
+        return row[0] if row else None
+
     def is_on_tv(self, local_path: Path) -> bool:
         """Whether a specific local image is currently uploaded to the TV."""
         row = self._conn.execute(

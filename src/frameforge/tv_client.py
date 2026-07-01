@@ -90,6 +90,75 @@ class FrameTVClient:
             except Exception as e:
                 print(f"  ! prune failed for {content_id}: {e}")
 
+    def list_art(self) -> list[dict]:
+        """List user-uploaded art currently stored on the TV.
+
+        Returns normalized dicts: {"content_id", "category_id", "image_date",
+        "width", "height"}. Prefers the "My Collection" category; falls back to
+        filtering the full list by the MY_* content-id prefix older firmwares use.
+        """
+        art = self._connect().art()
+        try:
+            items = art.available("MY-C0002")
+        except Exception:
+            items = [
+                i
+                for i in (art.available() or [])
+                if str(i.get("content_id", "")).startswith("MY")
+            ]
+        out: list[dict] = []
+        for i in items or []:
+            cid = i.get("content_id")
+            if not cid:
+                continue
+            out.append(
+                {
+                    "content_id": cid,
+                    "category_id": i.get("category_id"),
+                    "image_date": i.get("image_date"),
+                    "width": i.get("width"),
+                    "height": i.get("height"),
+                }
+            )
+        return out
+
+    def get_current_art(self) -> Optional[str]:
+        """content_id of the artwork the TV is displaying right now, if known."""
+        try:
+            info = self._connect().art().get_current()
+            if isinstance(info, dict):
+                return info.get("content_id")
+        except Exception:
+            pass
+        return None
+
+    def get_thumbnail(self, content_id: str) -> bytes:
+        """JPEG thumbnail bytes for one piece of art stored on the TV."""
+        data = self._connect().art().get_thumbnail(content_id)
+        if not isinstance(data, (bytes, bytearray)):
+            raise RuntimeError(f"Unexpected thumbnail payload for {content_id}")
+        return bytes(data)
+
+    def delete_art(self, content_ids: list[str]) -> list[str]:
+        """Delete art from the TV. Returns the content_ids actually removed."""
+        art = self._connect().art()
+        try:
+            art.delete_list(content_ids)
+            return list(content_ids)
+        except Exception:
+            removed: list[str] = []
+            for cid in content_ids:
+                try:
+                    art.delete(cid)
+                    removed.append(cid)
+                except Exception as e:
+                    print(f"  ! delete failed for {cid}: {e}")
+            return removed
+
+    def select_art(self, content_id: str) -> None:
+        """Display one piece of art on the TV immediately."""
+        self._connect().art().select_image(content_id, show=True)
+
     def start_slideshow(self, minutes: int = 30) -> None:
         tv = self._connect()
         tv.art().set_slideshow_status(duration=minutes, type="shuffleslideshow")

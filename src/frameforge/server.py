@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+import threading
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__
-from .config import Config, slugify
+from .config import Config
 from .discover import discover
 from .expander import Expansion, expand_theme
 from .generator import generate_batch
@@ -97,6 +97,7 @@ class ImageTile(BaseModel):
     filename: str
     prompt_short: str  # first 6 words + ellipsis, for the caption beneath the tile
     on_tv: bool        # drives the brass corner-dot indicator
+    content_id: Optional[str] = None  # TV content id when on_tv, for remove-from-TV
 
 
 class ThemeDetail(BaseModel):
@@ -255,6 +256,7 @@ def theme_detail(slug: str, with_expansion: bool = False) -> ThemeDetail:
                 filename=meta["filename"],
                 prompt_short=_short_prompt(meta["prompt"]),
                 on_tv=library.is_on_tv(e.image_path),
+                content_id=library.tv_content_id(e.image_path),
             )
         )
 
@@ -423,6 +425,265 @@ def tv_status() -> TVStatus:
             images_on_tv=images_on_tv,
             storage_cap=cfg.tv_storage_cap,
         )
+
+
+# ----- TV art management -------------------------------------------------
+# The TV screen's two-panel manager: what's on the TV, upload selected local
+# images, remove selected art, show one image now, restart the slideshow.
+
+# Serialize TV websocket traffic — the Frame gets confused by parallel sessions.
+_tv_lock = threading.Lock()
+# Thumbnails for art the TV holds but we didn't upload are fetched from the TV
+# itself, which is slow; cache them for the life of the server process.
+_thumb_cache: dict[str, bytes] = {}
+
+
+class TVArtItem(BaseModel):
+    content_id: str
+    matched: bool                 # True when we can map it to a library image
+    theme_slug: Optional[str]
+    theme_title: Optional[str]
+    filename: Optional[str]
+    uploaded_at: Optional[str]
+    is_current: bool              # the TV is displaying this one right now
+    thumbnail_url: str
+
+
+class TVArtResponse(BaseModel):
+    connected: bool
+    source: str  # "tv" (live list) | "cache" (TV unreachable; last known state)
+    current_content_id: Optional[str]
+    items: list[TVArtItem]
+
+
+def _art_item_from_db_row(
+    library: Library, content_id: str, local_path: str, slug: str, uploaded_at: str,
+    current_id: Optional[str],
+) -> TVArtItem:
+    p = Path(local_path)
+    if p.exists():
+        thumb = f"/api/themes/{slug}/images/{p.name}"
+    else:
+        thumb = f"/api/tv/art/{content_id}/thumbnail"
+    return TVArtItem(
+        content_id=content_id,
+        matched=True,
+        theme_slug=slug,
+        theme_title=slug.replace("_", " "),
+        filename=p.name,
+        uploaded_at=uploaded_at,
+        is_current=content_id == current_id,
+        thumbnail_url=thumb,
+    )
+
+
+def _cached_art_response(library: Library, connected: bool) -> TVArtResponse:
+    items = [
+        _art_item_from_db_row(library, cid, path, slug, up, None)
+        for cid, path, slug, up in library.list_tv_uploads()
+    ]
+    return TVArtResponse(
+        connected=connected, source="cache", current_content_id=None, items=items
+    )
+
+
+@app.get("/api/tv/art", response_model=TVArtResponse)
+def tv_art() -> TVArtResponse:
+    """What's on the TV, reconciled against the local upload records.
+
+    Records for art no longer on the TV (deleted via the remote, another app)
+    are pruned; art on the TV that we never uploaded shows up as unmatched.
+    Falls back to the last known DB state when the TV is unreachable.
+    """
+    cfg = Config()
+    library = Library(cfg)
+    if not cfg.tv_host:
+        return _cached_art_response(library, connected=False)
+
+    try:
+        with _tv_lock:
+            client = FrameTVClient(cfg, cfg.tv_host)
+            tv_items = client.list_art()
+            current_id = client.get_current_art()
+    except Exception:
+        return _cached_art_response(library, connected=False)
+
+    db_rows = {
+        cid: (path, slug, up) for cid, path, slug, up in library.list_tv_uploads()
+    }
+    tv_ids = {i["content_id"] for i in tv_items}
+    for cid in list(db_rows):
+        if cid not in tv_ids:
+            library.remove_upload(cid)
+            del db_rows[cid]
+
+    items: list[TVArtItem] = []
+    for i in tv_items:
+        cid = i["content_id"]
+        if cid in db_rows:
+            path, slug, up = db_rows[cid]
+            items.append(
+                _art_item_from_db_row(library, cid, path, slug, up, current_id)
+            )
+        else:
+            items.append(
+                TVArtItem(
+                    content_id=cid,
+                    matched=False,
+                    theme_slug=None,
+                    theme_title=None,
+                    filename=None,
+                    uploaded_at=i.get("image_date"),
+                    is_current=cid == current_id,
+                    thumbnail_url=f"/api/tv/art/{cid}/thumbnail",
+                )
+            )
+    return TVArtResponse(
+        connected=True, source="tv", current_content_id=current_id, items=items
+    )
+
+
+@app.get("/api/tv/art/{content_id}/thumbnail")
+def tv_art_thumbnail(content_id: str) -> Response:
+    """Thumbnail for art the TV holds but we don't have locally."""
+    if content_id in _thumb_cache:
+        return Response(content=_thumb_cache[content_id], media_type="image/jpeg")
+    cfg = Config()
+    if not cfg.tv_host:
+        raise HTTPException(status_code=404, detail="No TV configured")
+    try:
+        with _tv_lock:
+            data = FrameTVClient(cfg, cfg.tv_host).get_thumbnail(content_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thumbnail unavailable")
+    _thumb_cache[content_id] = data
+    return Response(content=data, media_type="image/jpeg")
+
+
+class TVUploadItem(BaseModel):
+    slug: str
+    filename: str
+
+
+class TVUploadRequest(BaseModel):
+    items: list[TVUploadItem]
+    matte: str = "shadowbox"
+    matte_color: str = "polar"
+
+
+@app.post("/api/tv/art/upload")
+async def tv_art_upload(body: TVUploadRequest) -> dict:
+    """Upload the selected library images to the TV."""
+    cfg = Config()
+    if not cfg.tv_host:
+        raise HTTPException(status_code=503, detail="No TV configured")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="No images selected")
+
+    to_upload: list[tuple[str, Path]] = []
+    for it in body.items:
+        p = cfg.theme_dir(it.slug) / it.filename
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"Image not found: {it.filename}")
+        to_upload.append((it.slug, p))
+
+    matte = body.matte if body.matte == "none" else f"{body.matte}_{body.matte_color}"
+
+    def work() -> list[str]:
+        library = Library(cfg)
+        client = FrameTVClient(cfg, cfg.tv_host)
+        uploaded: list[str] = []
+        with _tv_lock:
+            for slug, path in to_upload:
+                ids = client.upload_batch(
+                    library, slug, [path], matte=matte, portrait_matte=matte
+                )
+                uploaded.extend(ids)
+        return uploaded
+
+    await broker.broadcast({"state": "uploading", "total": len(to_upload)})
+    try:
+        uploaded = await asyncio.to_thread(work)
+    except Exception as e:
+        await broker.broadcast({"state": "error", "message": str(e)})
+        raise HTTPException(status_code=502, detail=f"TV upload failed: {e}")
+    await broker.broadcast({"state": "idle"})
+    return {"uploaded": uploaded, "count": len(uploaded)}
+
+
+class TVDeleteRequest(BaseModel):
+    content_ids: list[str]
+
+
+@app.post("/api/tv/art/delete")
+async def tv_art_delete(body: TVDeleteRequest) -> dict:
+    """Remove the selected art from the TV. Local library files are untouched."""
+    cfg = Config()
+    if not cfg.tv_host:
+        raise HTTPException(status_code=503, detail="No TV configured")
+    if not body.content_ids:
+        raise HTTPException(status_code=400, detail="No images selected")
+
+    def work() -> list[str]:
+        library = Library(cfg)
+        client = FrameTVClient(cfg, cfg.tv_host)
+        with _tv_lock:
+            removed = client.delete_art(body.content_ids)
+        for cid in removed:
+            library.remove_upload(cid)
+            _thumb_cache.pop(cid, None)
+        return removed
+
+    try:
+        removed = await asyncio.to_thread(work)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TV delete failed: {e}")
+    failed = [c for c in body.content_ids if c not in removed]
+    return {"removed": removed, "failed": failed}
+
+
+class TVSelectRequest(BaseModel):
+    content_id: str
+
+
+@app.post("/api/tv/art/select")
+async def tv_art_select(body: TVSelectRequest) -> dict:
+    """Display one piece of art on the TV right now."""
+    cfg = Config()
+    if not cfg.tv_host:
+        raise HTTPException(status_code=503, detail="No TV configured")
+
+    def work() -> None:
+        with _tv_lock:
+            FrameTVClient(cfg, cfg.tv_host).select_art(body.content_id)
+
+    try:
+        await asyncio.to_thread(work)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TV select failed: {e}")
+    return {"ok": True, "content_id": body.content_id}
+
+
+class SlideshowRequest(BaseModel):
+    minutes: int = 30
+
+
+@app.post("/api/tv/slideshow")
+async def tv_slideshow(body: SlideshowRequest) -> dict:
+    """(Re)start the shuffle slideshow over the art on the TV."""
+    cfg = Config()
+    if not cfg.tv_host:
+        raise HTTPException(status_code=503, detail="No TV configured")
+
+    def work() -> None:
+        with _tv_lock:
+            FrameTVClient(cfg, cfg.tv_host).start_slideshow(body.minutes)
+
+    try:
+        await asyncio.to_thread(work)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TV slideshow failed: {e}")
+    return {"ok": True, "minutes": body.minutes}
 
 
 @app.get("/api/settings", response_model=Settings)

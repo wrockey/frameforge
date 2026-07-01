@@ -132,12 +132,35 @@ Fetch: `GET /api/themes/{slug}/images/{filename}/inspect` → `InspectPayload`.
 - **Reconnect button**: `POST /api/tv/reconnect` *(roadmap)* — re-triggers
   pairing flow.
 - **Forget TV button**: `DELETE /api/tv` *(roadmap)* — removes token file.
-- **Currently on TV row**: derive from `GET /api/tv/uploads` *(roadmap;
-  currently exposed as part of TVStatus.images_on_tv count)*.
-- **Slideshow settings**:
-  - Minutes-per-image picker → POST'd at push time as the `minutes` field
-  - Matte style picker (8 swatches) → POST'd as `matte`
-  - Matte color picker (8 swatches) → POST'd as `matte_color`
+
+### TV art manager (two panels)
+
+- **"On the TV" panel**: `GET /api/tv/art` → `TVArtResponse`.
+  - The list comes live from the TV and is reconciled with the local upload
+    records: DB rows for art no longer on the TV are pruned; art the TV holds
+    that FrameForge never uploaded appears with `matched: false`.
+  - `item.thumbnail_url` → local image route for matched items,
+    `/api/tv/art/{content_id}/thumbnail` (fetched from the TV, cached
+    in-process) for unmatched ones.
+  - `item.is_current` → sage NOW SHOWING pill.
+  - `source === "cache"` → "TV unreachable" banner; items are the last known
+    DB state.
+  - Tile click toggles selection → **Remove n from TV** button →
+    `POST /api/tv/art/delete` with `{content_ids: [...]}`. Local files are
+    never touched.
+  - Tile hover **Show now** → `POST /api/tv/art/select` with `{content_id}`.
+- **"Your library" panel**: theme filter (`GET /api/themes`) + per-theme
+  grids (`GET /api/themes/{slug}`). Images already on the TV render dimmed
+  with an ON TV badge and can't be selected.
+  - Selection → **Upload n to TV** button → `POST /api/tv/art/upload` with
+    `{items: [{slug, filename}], matte, matte_color}`.
+- **Theme-detail tile toggle (+/−)**: same two endpoints, single image.
+  `ImageTile.content_id` (populated when `on_tv`) feeds the delete call.
+- **Slideshow & matte settings**:
+  - Minutes-per-image picker → **Restart slideshow** button →
+    `POST /api/tv/slideshow` with `{minutes}`; also sent at push time.
+  - Matte style + color pickers → applied to subsequent uploads
+    (`matte`/`matte_color` fields on the upload/push bodies).
 
 ## Schedule screen
 

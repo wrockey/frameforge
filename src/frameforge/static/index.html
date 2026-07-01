@@ -186,7 +186,45 @@
 
       <div class="tv-card" id="tv-card"></div>
 
-      <h2 class="section-title">Slideshow</h2>
+      <div class="tv-manager">
+        <!-- Left panel: what's on the TV right now -->
+        <div class="tv-panel" id="on-tv-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">On the TV</h2>
+            <span class="panel-count" id="on-tv-count"></span>
+            <div class="panel-actions">
+              <button class="btn btn-ghost btn-small" id="on-tv-refresh" title="Re-read the art list from the TV">↻ Refresh</button>
+              <button class="btn btn-ghost btn-small" id="on-tv-select-all">Select all</button>
+              <button class="btn btn-small btn-danger-solid" id="on-tv-remove" disabled>Remove from TV</button>
+            </div>
+          </div>
+          <p class="panel-note hidden" id="on-tv-stale">
+            TV unreachable — showing the last known state. <button class="btn-link" id="on-tv-retry">Retry</button>
+          </p>
+          <div class="art-grid" id="on-tv-grid"></div>
+          <p class="panel-empty hidden" id="on-tv-empty">
+            Nothing on the TV yet. Select images on the right and upload them.
+          </p>
+        </div>
+
+        <!-- Right panel: local library, upload from here -->
+        <div class="tv-panel" id="library-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Your library</h2>
+            <select class="panel-filter" id="library-theme-filter" aria-label="Filter by theme"></select>
+            <div class="panel-actions">
+              <button class="btn btn-ghost btn-small" id="library-select-all">Select all</button>
+              <button class="btn btn-primary btn-small" id="library-upload" disabled>Upload to TV</button>
+            </div>
+          </div>
+          <div class="art-grid" id="library-grid"></div>
+          <p class="panel-empty hidden" id="library-empty">
+            No generated images yet. Create a theme on the <a href="#/themes">Themes</a> screen first.
+          </p>
+        </div>
+      </div>
+
+      <h2 class="section-title">Slideshow &amp; matte</h2>
       <div class="slideshow-settings">
         <div class="setting-block">
           <label>Minutes per image</label>
@@ -203,13 +241,18 @@
         </div>
 
         <div class="setting-block">
-          <label>Matte style</label>
+          <label>Matte style <span class="setting-hint">applied to new uploads</span></label>
           <div class="swatch-row" id="matte-picker"></div>
         </div>
 
         <div class="setting-block">
           <label>Matte color</label>
           <div class="swatch-row" id="matte-color-picker"></div>
+        </div>
+
+        <div class="setting-block">
+          <button class="btn btn-secondary" id="slideshow-apply">Restart slideshow</button>
+          <span class="onboarding-meta" id="slideshow-result"></span>
         </div>
       </div>
     </section>
