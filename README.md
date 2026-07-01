@@ -28,6 +28,17 @@ frameforged                                       # http://localhost:8765
 
 First time you push to the TV, accept the pairing prompt with your TV remote.
 
+## Documentation
+
+| Doc | What's in it |
+|-----|--------------|
+| [Getting Started](docs/GETTING_STARTED.md) | Zero to art on the wall: install, find & pair the TV, first theme, phone setup |
+| [User Guide](docs/USER_GUIDE.md) | Every screen of the web UI, incl. the TV art manager; CLI equivalents |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Discovery, pairing, vanished art, phone access, token errors |
+| [Architecture](docs/ARCHITECTURE.md) | Module map, data flow, TV quirks, Mac-app plan |
+| [Wiring](docs/WIRING.md) | The UI ↔ REST/WebSocket contract (start here for a custom client) |
+| [Reproducibility](docs/REPRODUCIBILITY.md) | Provenance sidecars, seeds, model pinning |
+
 ## Two ways to run
 
 **CLI** (`frameforge`): scriptable, ideal for cron / launchd / one-off runs.
