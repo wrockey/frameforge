@@ -1519,3 +1519,72 @@ code {
   padding: 1px 6px;
   border-radius: 3px;
 }
+
+/* ----- Touch & small screens ----------------------------------------------- */
+
+/* No hover on touch devices: keep tile toolbars and selection boxes visible
+   instead of unreachable. */
+@media (hover: none) {
+  .tile-toolbar,
+  .art-toolbar,
+  .theme-card-toolbar,
+  .sel-box {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    gap: 14px;
+    padding: 0 14px;
+  }
+
+  .brand-name {
+    display: none; /* the ◇ mark suffices; frees room for the nav */
+  }
+
+  .primary-nav {
+    gap: 16px;
+    margin-left: 0;
+    overflow-x: auto;
+  }
+
+  main {
+    padding: 20px 16px 64px;
+  }
+
+  .image-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .art-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    max-height: 400px;
+  }
+
+  .detail-actions {
+    flex-wrap: wrap;
+  }
+
+  .settings-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .status-popover {
+    width: min(320px, calc(100vw - 24px));
+    right: 12px;
+  }
+
+  .tv-card {
+    grid-template-columns: 1fr;
+    padding: 18px 20px;
+  }
+
+  .panel-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

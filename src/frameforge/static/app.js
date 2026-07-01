@@ -5,8 +5,37 @@
  */
 
 const USE_MOCK = false;
-const API_BASE = "http://localhost:8765";
-const WS_URL = "ws://localhost:8765/ws/status";
+// Derive from wherever the page was served so the UI works from a phone on
+// the LAN, not just localhost. file:// prototyping falls back to localhost.
+const API_BASE = location.protocol.startsWith("http")
+  ? location.origin
+  : "http://localhost:8765";
+const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws/status";
+
+/* ---- API token (for servers started with FRAMEFORGE_API_TOKEN) ----------
+ * Accepted once via ?token=… in the URL (then scrubbed from the address bar),
+ * kept in localStorage, and attached to every request: as a Bearer header on
+ * fetches, as a query param on image/WebSocket URLs that can't set headers. */
+
+const TOKEN_KEY = "frameforge_token";
+
+(function captureTokenFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const t = params.get("token");
+  if (!t) return;
+  localStorage.setItem(TOKEN_KEY, t);
+  params.delete("token");
+  const qs = params.toString();
+  history.replaceState(null, "", location.pathname + (qs ? `?${qs}` : "") + location.hash);
+})();
+
+const authToken = () => localStorage.getItem(TOKEN_KEY) || "";
+
+function withToken(url) {
+  const t = authToken();
+  if (!t) return url;
+  return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(t);
+}
 
 /* ===========================================================================
  * MOCK_DATA
@@ -353,6 +382,15 @@ const mockApi = {
     await wait(200);
     return { ok: true, minutes: body.minutes };
   },
+  async setTvHost(host) {
+    await wait(120);
+    return { ok: true, host, env_override: false };
+  },
+  async forgetTv() {
+    await wait(120);
+    MOCK_DATA.tvStatus.connected = false;
+    return { ok: true };
+  },
   async settings() {
     await wait(40);
     return MOCK_DATA.settings;
@@ -384,9 +422,20 @@ const mockApi = {
 };
 
 /* fetch that surfaces FastAPI error details as thrown Errors, so button
- * handlers can show "TV upload failed: …" instead of silently succeeding. */
-async function jfetch(url, opts) {
-  const r = await fetch(url, opts);
+ * handlers can show "TV upload failed: …" instead of silently succeeding.
+ * On 401 it prompts once for the API token and retries. */
+async function jfetch(url, opts = {}, retried = false) {
+  const headers = { ...(opts.headers || {}) };
+  const t = authToken();
+  if (t) headers["Authorization"] = `Bearer ${t}`;
+  const r = await fetch(url, { ...opts, headers });
+  if (r.status === 401 && !retried) {
+    const entered = window.prompt("This FrameForge server requires an API token:");
+    if (entered && entered.trim()) {
+      localStorage.setItem(TOKEN_KEY, entered.trim());
+      return jfetch(url, opts, true);
+    }
+  }
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
     try {
@@ -421,11 +470,19 @@ const liveApi = {
   tvSlideshow: (body) => jpost(`${API_BASE}/api/tv/slideshow`, body),
   settings: () => jfetch(`${API_BASE}/api/settings`),
   schedules: () => jfetch(`${API_BASE}/api/schedules`),
+  setTvHost: (host) =>
+    jfetch(`${API_BASE}/api/tv/host`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host }),
+    }),
+  forgetTv: () => jfetch(`${API_BASE}/api/tv/host`, { method: "DELETE" }),
   generate: (slug, body) => jpost(`${API_BASE}/api/themes/${slug}/generate`, body),
   push: (slug, body) => jpost(`${API_BASE}/api/themes/${slug}/push`, body),
   testKey: (key) => jpost(`${API_BASE}/api/settings/test-key`, { key }),
-  imageUrl: (slug, filename) => `${API_BASE}/api/themes/${slug}/images/${filename}`,
-  thumbUrl: (url) => (url.startsWith("data:") ? url : `${API_BASE}${url}`),
+  imageUrl: (slug, filename) =>
+    withToken(`${API_BASE}/api/themes/${slug}/images/${filename}`),
+  thumbUrl: (url) => (url.startsWith("data:") ? url : withToken(`${API_BASE}${url}`)),
 };
 
 const api = USE_MOCK ? mockApi : liveApi;
@@ -489,7 +546,7 @@ function connectStatusWS() {
 
   let ws;
   const open = () => {
-    ws = new WebSocket(WS_URL);
+    ws = new WebSocket(withToken(WS_URL));
     ws.onmessage = (e) => {
       try {
         renderStatus(JSON.parse(e.data));
@@ -530,6 +587,7 @@ const routes = {
 };
 
 function showRoute(name) {
+  if (name !== "onboarding") stopPairTimers();
   document.querySelectorAll(".route").forEach((el) => {
     el.classList.toggle("hidden", el.dataset.route !== name);
   });
@@ -574,6 +632,7 @@ function enterOnboarding() {
 
 function showOnboardingStep(n) {
   onboardingStep = n;
+  stopPairTimers();
   document.querySelectorAll("[data-step-pane]").forEach((el) => {
     el.classList.toggle("hidden", el.dataset.stepPane !== String(n));
   });
@@ -628,38 +687,86 @@ document.getElementById("discover-rescan").addEventListener("click", runDiscover
 document.getElementById("discover-manual").addEventListener("click", () => {
   document.getElementById("manual-ip").classList.toggle("hidden");
 });
-document.getElementById("manual-ip-go").addEventListener("click", () => {
+/* Save the chosen host to the server (settings.json), then move to pairing. */
+async function confirmTvChoice(btn) {
+  if (!chosenTV) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    const r = await api.setTvHost(chosenTV.host);
+    if (r.env_override) {
+      alert(
+        "Saved, but FRAMEFORGE_TV_HOST is set in the server's environment and overrides this choice.",
+      );
+    }
+    showOnboardingStep(3);
+  } catch (err) {
+    alert(`Could not save the TV: ${err.message || err}`);
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+}
+
+document.getElementById("manual-ip-go").addEventListener("click", (e) => {
   const v = document.getElementById("manual-ip-input").value.trim();
   if (!v) return;
   chosenTV = { host: v, model_name: "(manual)", mac: "", is_frame: true };
-  showOnboardingStep(3);
+  confirmTvChoice(e.currentTarget);
 });
-document.getElementById("discover-confirm").addEventListener("click", () => showOnboardingStep(3));
+document.getElementById("discover-confirm").addEventListener("click", (e) => {
+  confirmTvChoice(e.currentTarget);
+});
+
+/* Pairing: connecting to the TV triggers the allow/deny prompt on its screen,
+ * so we simply poll /api/tv/status until it reports connected. */
+let pairTimers = [];
+
+function stopPairTimers() {
+  pairTimers.forEach(clearInterval);
+  pairTimers = [];
+}
 
 function runPairCountdown() {
-  const ring = document.getElementById("pair-ring");
   const text = document.getElementById("pair-countdown-text");
   const status = document.getElementById("pair-status");
   const cont = document.getElementById("pair-continue");
-  let t = 30;
+  stopPairTimers();
+  let t = 45;
+  let polling = false;
   text.textContent = t;
   cont.classList.add("hidden");
   status.textContent = "Waiting for confirmation on the TV…";
+  const done = (ok) => {
+    stopPairTimers();
+    if (ok) {
+      status.textContent = "Paired. Token saved.";
+      cont.classList.remove("hidden");
+    } else {
+      status.textContent = "Timed out. Go back and try again, remote in hand.";
+    }
+  };
   const tick = setInterval(() => {
     t -= 1;
     text.textContent = t;
-    if (t === 18) {
-      // pretend the TV accepted
-      status.textContent = "Paired. Token saved.";
-      cont.classList.remove("hidden");
-    }
-    if (t <= 0) {
-      clearInterval(tick);
-      status.textContent = "Timed out. Try again from your TV remote.";
-    }
+    if (USE_MOCK && t === 33) done(true); // demo: pretend the TV accepted
+    if (t <= 0) done(false);
   }, 1000);
+  pairTimers.push(tick);
+  if (!USE_MOCK) {
+    const poll = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const s = await api.tvStatus();
+        if (s.connected) done(true);
+      } catch (_) {}
+      polling = false;
+    }, 3000);
+    pairTimers.push(poll);
+  }
   cont.onclick = () => {
-    clearInterval(tick);
+    stopPairTimers();
     showOnboardingStep(4);
   };
 }
@@ -952,7 +1059,20 @@ async function renderTvStatusCard() {
           <dt>ON TV</dt><dd>${status.images_on_tv} / ${status.storage_cap}</dd>
         </dl>
       </div>
+      <div class="tv-actions">
+        <button class="btn btn-ghost btn-danger" id="tv-forget">Forget TV</button>
+      </div>
     `;
+    document.getElementById("tv-forget").onclick = async () => {
+      if (!confirm("Forget this TV? The saved host and pairing token are removed; art on the TV stays put.")) return;
+      try {
+        await api.forgetTv();
+      } catch (err) {
+        alert(`Could not forget the TV: ${err.message || err}`);
+        return;
+      }
+      renderTV();
+    };
   }
 }
 
@@ -997,9 +1117,10 @@ function onTvTileEl(item) {
     <div class="art-thumb" style="background-image:url('${api.thumbUrl(item.thumbnail_url)}')">
       <span class="sel-box" aria-hidden="true"></span>
       ${item.is_current ? '<span class="pill pill-now">NOW SHOWING</span>' : ""}
+      ${item.is_current ? "" : `
       <div class="art-toolbar">
         <button data-act="show" title="Display this image on the TV now">Show now</button>
-      </div>
+      </div>`}
     </div>
     <div class="art-caption ${item.matched ? "" : "art-caption-dim"}">${escapeHtml(caption)}</div>
   `;
@@ -1011,22 +1132,24 @@ function onTvTileEl(item) {
     sync();
     updateTvActionButtons();
   };
-  el.querySelector('[data-act="show"]').onclick = async (e) => {
-    e.stopPropagation();
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    btn.textContent = "Showing…";
-    try {
-      await api.tvSelect({ content_id: item.content_id });
-      await refreshOnTv();
-    } catch (err) {
-      btn.textContent = "Failed";
-      setTimeout(() => {
-        btn.disabled = false;
-        btn.textContent = "Show now";
-      }, 1600);
-    }
-  };
+  const showBtn = el.querySelector('[data-act="show"]');
+  if (showBtn) {
+    showBtn.onclick = async (e) => {
+      e.stopPropagation();
+      showBtn.disabled = true;
+      showBtn.textContent = "Showing…";
+      try {
+        await api.tvSelect({ content_id: item.content_id });
+        await refreshOnTv();
+      } catch (err) {
+        showBtn.textContent = "Failed";
+        setTimeout(() => {
+          showBtn.disabled = false;
+          showBtn.textContent = "Show now";
+        }, 1600);
+      }
+    };
+  }
   sync();
   return el;
 }

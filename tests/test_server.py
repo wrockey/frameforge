@@ -371,3 +371,78 @@ def test_tv_select_and_slideshow(app_with_tv):
     r = client.post("/api/tv/slideshow", json={"minutes": 60})
     assert r.status_code == 200
     assert FakeFrameTVClient.slideshow_minutes == [60]
+
+
+# ----- API token auth ---------------------------------------------------------
+
+
+def test_no_token_configured_means_open_api(app_with_fixture):
+    client, _ = app_with_fixture
+    assert client.get("/api/themes").status_code == 200
+    assert client.get("/api/health").json()["auth_required"] is False
+
+
+def test_token_required_when_configured(app_with_fixture, monkeypatch):
+    client, _ = app_with_fixture
+    monkeypatch.setenv("FRAMEFORGE_API_TOKEN", "s3cret")
+    # health stays open and advertises that auth is on
+    h = client.get("/api/health")
+    assert h.status_code == 200
+    assert h.json()["auth_required"] is True
+    # everything else is closed without the token
+    assert client.get("/api/themes").status_code == 401
+    assert (
+        client.post("/api/tv/slideshow", json={"minutes": 30}).status_code == 401
+    )
+    # Bearer header works
+    r = client.get("/api/themes", headers={"Authorization": "Bearer s3cret"})
+    assert r.status_code == 200
+    # query param works (for image URLs / WebSocket that can't set headers)
+    r = client.get(
+        "/api/themes/vintage_pulp_fantasy/images/img_0001.png",
+        params={"token": "s3cret"},
+    )
+    assert r.status_code == 200
+    # wrong token rejected
+    r = client.get("/api/themes", headers={"Authorization": "Bearer nope"})
+    assert r.status_code == 401
+
+
+# ----- TV host persistence ------------------------------------------------
+
+
+def test_tv_host_saved_and_forgotten(app_with_tv, monkeypatch):
+    """PUT /api/tv/host persists to settings.json and Config picks it up."""
+    client, lib_root = app_with_tv
+    monkeypatch.delenv("FRAMEFORGE_TV_HOST")
+
+    # Without env var or saved host: TV endpoints fall back / 503
+    assert client.get("/api/tv/art").json()["connected"] is False
+    assert client.post("/api/tv/slideshow", json={"minutes": 30}).status_code == 503
+
+    r = client.put("/api/tv/host", json={"host": "192.0.2.99"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "host": "192.0.2.99", "env_override": False}
+    assert json.loads((lib_root / "settings.json").read_text())["tv_host"] == "192.0.2.99"
+
+    # Config now resolves the saved host: live TV endpoints work (fake client)
+    art = client.get("/api/tv/art").json()
+    assert art["connected"] is True
+
+    # Forget: settings cleared and endpoints revert to unconfigured
+    r = client.delete("/api/tv/host")
+    assert r.status_code == 200
+    assert "tv_host" not in json.loads((lib_root / "settings.json").read_text())
+    assert client.get("/api/tv/art").json()["connected"] is False
+
+
+def test_tv_host_env_override_flagged(app_with_tv):
+    client, _ = app_with_tv  # fixture sets FRAMEFORGE_TV_HOST=192.0.2.10
+    r = client.put("/api/tv/host", json={"host": "192.0.2.99"})
+    assert r.status_code == 200
+    assert r.json()["env_override"] is True
+
+
+def test_tv_host_empty_rejected(app_with_tv):
+    client, _ = app_with_tv
+    assert client.put("/api/tv/host", json={"host": "   "}).status_code == 400

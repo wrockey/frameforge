@@ -5,8 +5,18 @@ backend endpoint or WebSocket event that drives it. Use it as the contract when
 implementing the frontend: component name from the design ↔ endpoint and the
 shape it returns.
 
-The backend listens on `http://localhost:8765`. The header status chip
-subscribes to `ws://localhost:8765/ws/status` for live updates.
+The backend listens on `http://127.0.0.1:8765` by default
+(`FRAMEFORGE_BIND_HOST` / `FRAMEFORGE_BIND_PORT` override — bind `0.0.0.0`
+to use the UI from a phone). The frontend derives its API base and the
+status WebSocket URL from `location.origin`, so it works from any address
+the server is reachable at.
+
+**Auth**: when `FRAMEFORGE_API_TOKEN` is set, every `/api` route except
+`/api/health` requires the token — `Authorization: Bearer <token>` on
+fetches, `?token=` on image URLs and the WebSocket (which can't set
+headers). `/api/health` returns `auth_required` so clients can tell. The
+frontend accepts the token once via `?token=…` in the page URL, stores it
+in localStorage, scrubs it from the address bar, and prompts on a 401.
 
 ## Header status chip (every screen)
 
@@ -32,18 +42,17 @@ Static. No backend call.
 - **Discovered TV card**: render the first item where `is_frame === true`.
   Display: model_name (display serif), `host · MAC mac` (mono).
 - **`Search again` button**: re-call `GET /api/discover`.
-- **`This is the right one` button**: store `host` in app state, advance to
-  step 3. (Persistence to backend happens at end of onboarding.)
-- **`enter the IP manually` link**: text input that sets the same app-state
-  variable and skips ahead.
+- **`This is the right one` button**: `PUT /api/tv/host` with `{host}` —
+  persisted to `settings.json` in the library root (the `FRAMEFORGE_TV_HOST`
+  env var still overrides; the response's `env_override` flag says so) —
+  then advance to step 3.
+- **`enter the IP manually` link**: text input feeding the same `PUT`.
 
 ### Step 3 — Pair
-- Frontend opens a WebSocket and posts to a small endpoint to trigger pairing.
-  *Pairing itself happens TV-side*; we just trigger the connect attempt.
-- Recommended approach: lazy — trigger pairing on the *first* call that needs
-  the TV (i.e., the first push). For onboarding, simulate by calling
-  `GET /api/tv/status?host=…`. If `connected === true`, pairing succeeded.
-- **30-second countdown**: pure frontend animation.
+- Connecting to the TV triggers the allow/deny prompt on its screen, so the
+  frontend polls `GET /api/tv/status` every 3 s; `connected === true` means
+  pairing succeeded and the token file is saved.
+- **45-second countdown**: frontend animation around the poll.
 
 ### Step 4 — API key
 - **Input field (default masked)**: collected client-side.
@@ -129,9 +138,8 @@ Fetch: `GET /api/themes/{slug}/images/{filename}/inspect` → `InspectPayload`.
   - `connected` → CONNECTED pill (sage) when true; otherwise the disconnected
     empty state from the design system.
   - `host`, `mac`, `art_mode`, `last_seen` → metadata row
-- **Reconnect button**: `POST /api/tv/reconnect` *(roadmap)* — re-triggers
-  pairing flow.
-- **Forget TV button**: `DELETE /api/tv` *(roadmap)* — removes token file.
+- **Forget TV button**: `DELETE /api/tv/host` — clears the saved host from
+  `settings.json` and removes the pairing token file.
 
 ### TV art manager (two panels)
 

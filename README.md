@@ -119,6 +119,23 @@ The web UI's **TV** screen is a two-panel manager:
 Each theme's detail grid also has a per-image **+ / −** toggle to send a
 single image to the TV or pull it off.
 
+## Using the UI from your phone
+
+By default the server binds to loopback. To use FrameForge from a phone on
+the same Wi-Fi (it installs to the home screen as a web app):
+
+```bash
+# in .env
+FRAMEFORGE_BIND_HOST=0.0.0.0
+FRAMEFORGE_API_TOKEN=pick-something-long
+```
+
+Then open `http://<your-mac-ip>:8765/?token=pick-something-long` on the
+phone once — the token is stored in the browser — and use Share →
+*Add to Home Screen*. Without a token, anyone on your network could control
+the TV and spend your API credits, so set one whenever you bind beyond
+loopback.
+
 ## Roadmap
 
 - v0.2: image regenerate-one, delete-image, schedule CRUD endpoints

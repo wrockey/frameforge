@@ -9,18 +9,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__
-from .config import Config
+from .config import Config, write_settings
 from .discover import discover
 from .expander import Expansion, expand_theme
 from .generator import generate_batch
@@ -39,6 +40,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ----- API token auth ---------------------------------------------------------
+# Off by default (loopback-only server). When FRAMEFORGE_API_TOKEN is set —
+# e.g. because the server is bound to the LAN for a phone — every /api request
+# must present it. /api/health stays open so clients can detect the server and
+# whether auth is required. The static UI shell is served without a token; it
+# holds no secrets and needs the token itself to call the API.
+
+
+def _request_token(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    # background-image URLs and the WebSocket can't set headers
+    return request.query_params.get("token", "")
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    token = Config().api_token
+    path = request.url.path
+    if token and path.startswith("/api/") and path != "/api/health":
+        if _request_token(request) != token:
+            return JSONResponse({"detail": "Invalid or missing API token"}, status_code=401)
+    return await call_next(request)
 
 
 # ----- Status broadcaster ----------------------------------------------------
@@ -189,7 +216,11 @@ def _last_refreshed_iso(library: Library, slug: str) -> Optional[str]:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__}
+    return {
+        "ok": True,
+        "version": __version__,
+        "auth_required": bool(Config().api_token),
+    }
 
 
 @app.get("/api/discover")
@@ -425,6 +456,42 @@ def tv_status() -> TVStatus:
             images_on_tv=images_on_tv,
             storage_cap=cfg.tv_storage_cap,
         )
+
+
+# ----- TV host persistence -----------------------------------------------
+# Lets the onboarding flow save the discovered TV so the whole setup can
+# happen in the browser. FRAMEFORGE_TV_HOST in the environment still wins.
+
+
+class TVHostRequest(BaseModel):
+    host: str
+
+
+@app.put("/api/tv/host")
+def set_tv_host(body: TVHostRequest) -> dict:
+    host = body.host.strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Host must not be empty")
+    cfg = Config()
+    write_settings(cfg.library_root, {"tv_host": host})
+    env_host = os.environ.get("FRAMEFORGE_TV_HOST")
+    return {
+        "ok": True,
+        "host": host,
+        "env_override": bool(env_host and env_host != host),
+    }
+
+
+@app.delete("/api/tv/host")
+def forget_tv() -> dict:
+    """Forget the saved TV and its pairing token."""
+    cfg = Config()
+    write_settings(cfg.library_root, {"tv_host": None})
+    try:
+        cfg.token_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {"ok": True}
 
 
 # ----- TV art management -------------------------------------------------
@@ -703,6 +770,10 @@ def get_settings() -> Settings:
 
 @app.websocket("/ws/status")
 async def ws_status(ws: WebSocket) -> None:
+    token = Config().api_token
+    if token and ws.query_params.get("token", "") != token:
+        await ws.close(code=1008)  # policy violation
+        return
     await broker.connect(ws)
     try:
         while True:
@@ -725,10 +796,17 @@ if _STATIC_DIR.exists():
 def main() -> None:
     import uvicorn
 
+    cfg = Config()
+    print(f"FrameForge {__version__} — http://{cfg.bind_host}:{cfg.bind_port}")
+    if cfg.bind_host not in ("127.0.0.1", "localhost") and not cfg.api_token:
+        print(
+            "  ⚠ Bound beyond loopback with no FRAMEFORGE_API_TOKEN set — "
+            "anyone on the network can control your TV and spend API credits."
+        )
     uvicorn.run(
         "frameforge.server:app",
-        host="127.0.0.1",
-        port=8765,
+        host=cfg.bind_host,
+        port=cfg.bind_port,
         reload=False,
     )
 
