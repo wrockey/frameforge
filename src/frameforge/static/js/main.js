@@ -1,5 +1,6 @@
 import { connectStatusWS } from "./status.js";
 import { navigate } from "./router.js";
+import { startTvHealth } from "./tvhealth.js";
 
 /* ===========================================================================
  * Bootstrap
@@ -7,3 +8,4 @@ import { navigate } from "./router.js";
 
 connectStatusWS();
 navigate();
+startTvHealth();

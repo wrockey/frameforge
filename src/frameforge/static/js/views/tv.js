@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { escapeHtml, relativeTime } from "../util.js";
+import { pollTvHealth, tvActionError } from "../tvhealth.js";
 
 /* ===========================================================================
  * TV screen
@@ -42,13 +43,41 @@ export async function renderTV() {
 async function renderTvStatusCard() {
   const card = document.getElementById("tv-card");
   const status = await api.tvStatus();
-  if (!status.connected) {
+  if (!status.connected && !status.host) {
     card.innerHTML = `
       <div class="tv-empty">
         <p class="lede" style="margin:0 0 12px">No TV connected.</p>
         <a class="btn btn-primary" href="#/onboarding">Run setup</a>
-      </div>
-    `;
+      </div>`;
+  } else if (!status.connected) {
+    card.innerHTML = `
+      <div class="tv-empty">
+        <p class="lede" style="margin:0 0 4px">Can’t reach the TV at ${escapeHtml(status.host)}.</p>
+        <p class="onboarding-meta" style="margin:0 0 12px">Is it powered on and on this Wi-Fi? If its address changed, rediscover it — no re-pairing needed.</p>
+        <button class="btn btn-secondary" id="tv-retry">Retry</button>
+        <button class="btn btn-primary" id="tv-rediscover">Find my TV again</button>
+      </div>`;
+    document.getElementById("tv-retry").onclick = () => renderTV();
+    document.getElementById("tv-rediscover").onclick = async () => {
+      const btn = document.getElementById("tv-rediscover");
+      btn.disabled = true;
+      btn.textContent = "Searching…";
+      try {
+        const tvs = await api.discover();
+        const frame = tvs.find((t) => t.is_frame) || tvs[0];
+        if (!frame) {
+          alert("No Samsung TVs found on this network.");
+          return;
+        }
+        await api.setTvHost(frame.host);
+        renderTV();
+      } catch (err) {
+        alert(`Discovery failed: ${tvActionError(err)}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Find my TV again";
+      }
+    };
   } else {
     card.innerHTML = `
       <div>
@@ -278,9 +307,10 @@ function wireTvPanelButtons() {
       tvView.selOnTv.clear();
       if (r.failed?.length) alert(`${r.failed.length} image(s) could not be removed.`);
     } catch (err) {
-      alert(`Remove failed: ${err.message || err}`);
+      alert(`Remove failed: ${tvActionError(err)}`);
     }
     await Promise.all([refreshOnTv(), refreshLibraryPanel(false), renderTvStatusCard()]);
+    pollTvHealth();
   };
 
   document.getElementById("library-upload").onclick = async () => {
@@ -300,9 +330,10 @@ function wireTvPanelButtons() {
       });
       tvView.selLib.clear();
     } catch (err) {
-      alert(`Upload failed: ${err.message || err}`);
+      alert(`Upload failed: ${tvActionError(err)}`);
     }
     await Promise.all([refreshOnTv(), refreshLibraryPanel(false), renderTvStatusCard()]);
+    pollTvHealth();
   };
 
   document.getElementById("slideshow-apply").onclick = async () => {

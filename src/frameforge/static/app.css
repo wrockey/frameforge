@@ -154,6 +154,20 @@ button {
   border-bottom-color: var(--brass);
 }
 
+/* Header TV connection chip */
+.tv-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--divider);
+  text-decoration: none;
+  color: inherit;
+  white-space: nowrap;
+}
+.tv-chip[data-state="ok"] { border-color: var(--sage); color: #4a6b34; }
+.tv-chip[data-state="unreachable"] { border-color: var(--alarm); color: #963f22; }
+.tv-chip[data-state="none"] { opacity: 0.6; }
+
 .status-chip {
   display: inline-flex;
   align-items: center;
