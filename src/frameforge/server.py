@@ -30,7 +30,9 @@ from .imports import (
     ImportTooLarge,
     InvalidCrop,
     InvalidImage,
+    OriginalMissing,
     import_image,
+    recrop_image,
 )
 from .library import Library
 from .pipeline import run_push as _run_push
@@ -811,6 +813,35 @@ async def create_import(
         "slug": IMPORTED_SLUG,
         "filename": result.filename,
         "original_filename": result.original_filename,
+        "width": result.width,
+        "height": result.height,
+    }
+
+
+class RecropRequest(BaseModel):
+    crop_x: int
+    crop_y: int
+    crop_w: int
+    crop_h: int
+
+
+@app.post("/api/imports/{filename}/recrop")
+async def recrop(filename: str, body: RecropRequest) -> dict:
+    cfg = Config()
+    try:
+        result = await asyncio.to_thread(
+            recrop_image,
+            cfg,
+            filename,
+            (body.crop_x, body.crop_y, body.crop_w, body.crop_h),
+        )
+    except OriginalMissing as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidCrop as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "slug": IMPORTED_SLUG,
+        "filename": result.filename,
         "width": result.width,
         "height": result.height,
     }

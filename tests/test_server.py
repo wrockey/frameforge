@@ -589,3 +589,29 @@ def test_import_endpoint_oversized_413(app_with_fixture, monkeypatch):
         "/api/imports", files={"file": ("x.png", _upload_png(), "image/png")}
     )
     assert r.status_code == 413
+
+
+def test_recrop_endpoint(app_with_fixture):
+    client, lib_root = app_with_fixture
+    up = client.post(
+        "/api/imports",
+        files={"file": ("sq.png", _upload_png(4000, 4000), "image/png")},
+        data={"crop_x": "0", "crop_y": "0", "crop_w": "4000", "crop_h": "2250"},
+    )
+    filename = up.json()["filename"]
+    r = client.post(
+        f"/api/imports/{filename}/recrop",
+        json={"crop_x": 0, "crop_y": 1750, "crop_w": 4000, "crop_h": 2250},
+    )
+    assert r.status_code == 200
+    meta = json.loads((lib_root / "imported" / filename).with_suffix(".json").read_text())
+    assert meta["crop"]["y"] == 1750
+
+
+def test_recrop_unknown_404(app_with_fixture):
+    client, _ = app_with_fixture
+    r = client.post(
+        "/api/imports/img_9999.png/recrop",
+        json={"crop_x": 0, "crop_y": 0, "crop_w": 1600, "crop_h": 900},
+    )
+    assert r.status_code == 404
