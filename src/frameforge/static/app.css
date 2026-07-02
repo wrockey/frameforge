@@ -1174,6 +1174,15 @@ main {
   margin: 0 0 12px;
 }
 
+.now-showing-strip {
+  font-size: 13px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: rgba(123, 160, 91, 0.12);
+  border-left: 3px solid #7ba05b;
+  cursor: pointer;
+}
+
 .selection-bar {
   display: flex;
   gap: 10px;

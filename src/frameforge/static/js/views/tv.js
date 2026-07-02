@@ -175,6 +175,22 @@ function renderOnTvGrid() {
     (i) => i.filename || i.content_id,
   );
 
+  items = [...items].sort((a, b) => Number(b.is_current) - Number(a.is_current));
+
+  const strip = document.getElementById("now-showing-strip");
+  const current = (art.items || []).find((i) => i.is_current);
+  strip.classList.toggle("hidden", !current);
+  if (current) {
+    const label = current.matched
+      ? `${current.theme_title} · ${current.filename}`
+      : "art uploaded outside FrameForge";
+    strip.textContent = `Now on the wall: ${label}`;
+    strip.onclick = () => {
+      const el = document.querySelector(`#on-tv-grid .art-tile[data-key="${current.content_id}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+  }
+
   const n = art.items.length;
   document.getElementById("on-tv-count").textContent = n
     ? `${n} image${n === 1 ? "" : "s"}`
