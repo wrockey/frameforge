@@ -101,6 +101,24 @@ const liveApi = {
   imageUrl: (slug, filename) =>
     withToken(`${API_BASE}/api/themes/${slug}/images/${filename}`),
   thumbUrl: (url) => (url.startsWith("data:") ? url : withToken(`${API_BASE}${url}`)),
+  importImage: (file, crop) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    if (crop) {
+      fd.append("crop_x", Math.round(crop.x));
+      fd.append("crop_y", Math.round(crop.y));
+      fd.append("crop_w", Math.round(crop.w));
+      fd.append("crop_h", Math.round(crop.h));
+    }
+    return jfetch(`${API_BASE}/api/imports`, { method: "POST", body: fd });
+  },
+  recropImage: (filename, crop) =>
+    jpost(`${API_BASE}/api/imports/${filename}/recrop`, {
+      crop_x: Math.round(crop.x),
+      crop_y: Math.round(crop.y),
+      crop_w: Math.round(crop.w),
+      crop_h: Math.round(crop.h),
+    }),
 };
 
 export const api = USE_MOCK ? mockApi : liveApi;

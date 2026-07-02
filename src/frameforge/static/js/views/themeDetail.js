@@ -16,6 +16,7 @@ export async function renderThemeDetail(slug) {
   document.getElementById("detail-meta").textContent =
     `${detail.image_count} images · refreshed ${relativeTime(detail.last_refreshed)} · ${detail.size_mb} MB · v${detail.version_pin} · ${detail.image_model}`;
   document.getElementById("detail-on-tv-pill").classList.toggle("hidden", detail.state !== "on_tv");
+  document.getElementById("detail-regenerate").classList.toggle("hidden", slug === "imported");
 
   // Reset expansion panel
   const panel = document.getElementById("expansion-panel");

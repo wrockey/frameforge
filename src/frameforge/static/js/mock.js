@@ -374,4 +374,6 @@ export const mockApi = {
     return makePlaceholderSvg(tile?._seed ?? 1, tile?._hue ?? 180);
   },
   thumbUrl: (url) => url,
+  importImage: async () => ({ slug: "imported", filename: "img_0001.png" }),
+  recropImage: async () => ({ slug: "imported", filename: "img_0001.png" }),
 };

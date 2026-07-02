@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { escapeHtml, relativeTime } from "../util.js";
 import { pollTvHealth, tvActionError } from "../tvhealth.js";
+import { importWithCrop } from "../crop.js";
 
 /* ===========================================================================
  * TV screen
@@ -276,9 +277,45 @@ function updateTvActionButtons() {
   up.textContent = nUp ? `Upload ${nUp} to TV` : "Upload to TV";
 }
 
+async function runImport(files) {
+  const { imported, sendToTv } = await importWithCrop(files);
+  if (!imported.length) return;
+  if (sendToTv) {
+    try {
+      await api.tvUpload({
+        items: imported,
+        matte: tvView.matte,
+        matte_color: tvView.matteColor,
+      });
+    } catch (err) {
+      alert(`Imported ${imported.length}, but TV upload failed: ${tvActionError(err)}`);
+    }
+    await refreshOnTv();
+  }
+  await refreshLibraryPanel(true);
+}
+
 function wireTvPanelButtons() {
   document.getElementById("on-tv-refresh").onclick = () => refreshOnTv();
   document.getElementById("on-tv-retry").onclick = () => refreshOnTv();
+
+  const fileInput = document.getElementById("import-file-input");
+  document.getElementById("library-import").onclick = () => fileInput.click();
+  fileInput.onchange = () => {
+    runImport([...fileInput.files]);
+    fileInput.value = "";
+  };
+  const panel = document.getElementById("library-panel");
+  panel.ondragover = (e) => {
+    e.preventDefault();
+    panel.classList.add("drop-target");
+  };
+  panel.ondragleave = () => panel.classList.remove("drop-target");
+  panel.ondrop = (e) => {
+    e.preventDefault();
+    panel.classList.remove("drop-target");
+    runImport([...e.dataTransfer.files]);
+  };
 
   document.getElementById("on-tv-select-all").onclick = () => {
     const items = tvView.art?.items ?? [];
