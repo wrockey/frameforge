@@ -520,3 +520,72 @@ def test_imported_inspect_and_manifest(app_with_imported):
     lib = Library(Config(library_root=lib_root))
     manifest = lib.write_manifest("imported")
     assert "img_0001.png" in manifest.read_text()
+
+
+# ----- Image imports -------------------------------------------------------
+
+
+def _upload_png(w=1920, h=1080):
+    from io import BytesIO
+
+    buf = BytesIO()
+    Image.new("RGB", (w, h), (10, 120, 90)).save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+def test_import_endpoint_no_crop(app_with_fixture):
+    client, lib_root = app_with_fixture
+    r = client.post(
+        "/api/imports",
+        files={"file": ("photo.png", _upload_png(), "image/png")},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["slug"] == "imported" and body["filename"] == "img_0001.png"
+    assert (lib_root / "imported" / "img_0001.png").exists()
+    assert (lib_root / "imported" / "originals" / "photo.png").exists()
+    # imported theme now appears in the themes list
+    slugs = [c["slug"] for c in client.get("/api/themes").json()]
+    assert "imported" in slugs
+
+
+def test_import_endpoint_with_crop(app_with_fixture):
+    client, lib_root = app_with_fixture
+    r = client.post(
+        "/api/imports",
+        files={"file": ("wide.png", _upload_png(4000, 3000), "image/png")},
+        data={"crop_x": "0", "crop_y": "375", "crop_w": "4000", "crop_h": "2250"},
+    )
+    assert r.status_code == 200
+    out = Image.open(lib_root / "imported" / r.json()["filename"])
+    assert (out.width, out.height) == (3840, 2160)
+
+
+def test_import_endpoint_partial_crop_400(app_with_fixture):
+    client, _ = app_with_fixture
+    r = client.post(
+        "/api/imports",
+        files={"file": ("x.png", _upload_png(), "image/png")},
+        data={"crop_x": "0"},
+    )
+    assert r.status_code == 400
+
+
+def test_import_endpoint_bad_image_400(app_with_fixture):
+    client, _ = app_with_fixture
+    r = client.post(
+        "/api/imports", files={"file": ("x.png", b"garbage", "image/png")}
+    )
+    assert r.status_code == 400
+
+
+def test_import_endpoint_oversized_413(app_with_fixture, monkeypatch):
+    import frameforge.imports as imports_mod
+
+    monkeypatch.setattr(imports_mod, "MAX_UPLOAD_BYTES", 100)
+    client, _ = app_with_fixture
+    r = client.post(
+        "/api/imports", files={"file": ("x.png", _upload_png(), "image/png")}
+    )
+    assert r.status_code == 413

@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,13 @@ from .config import Config, write_settings
 from .discover import discover
 from .expander import Expansion, expand_theme
 from .generator import generate_batch
+from .imports import (
+    IMPORTED_SLUG,
+    ImportTooLarge,
+    InvalidCrop,
+    InvalidImage,
+    import_image,
+)
 from .library import Library
 from .pipeline import run_push as _run_push
 from .tv_client import FrameTVClient
@@ -766,6 +773,47 @@ def get_settings() -> Settings:
         aspect_ratio=cfg.aspect_ratio,
         target_count=cfg.target_count,
     )
+
+
+# ----- Image imports -------------------------------------------------------
+# Any image from disk becomes a library entry in the reserved "imported"
+# collection: cropped to 16:9 server-side, original preserved for recrops.
+
+
+@app.post("/api/imports")
+async def create_import(
+    file: UploadFile = File(...),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
+) -> dict:
+    parts = [crop_x, crop_y, crop_w, crop_h]
+    given = [p is not None for p in parts]
+    if any(given) and not all(given):
+        raise HTTPException(
+            status_code=400, detail="Provide all of crop_x/y/w/h, or none"
+        )
+    crop = (crop_x, crop_y, crop_w, crop_h) if all(given) else None
+
+    data = await file.read()
+    cfg = Config()
+    try:
+        result = await asyncio.to_thread(
+            import_image, cfg, data, file.filename or "import", crop
+        )
+    except ImportTooLarge as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except (InvalidImage, InvalidCrop) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await asyncio.to_thread(Library(cfg).write_manifest, IMPORTED_SLUG)
+    return {
+        "slug": IMPORTED_SLUG,
+        "filename": result.filename,
+        "original_filename": result.original_filename,
+        "width": result.width,
+        "height": result.height,
+    }
 
 
 # ----- WebSocket for the header status chip ---------------------------------
