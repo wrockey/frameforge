@@ -32,6 +32,10 @@ export const tvView = {
   libImages: [], // flattened [{slug, theme_title, filename, on_tv, content_id}]
   selOnTv: new Set(), // content_ids
   selLib: new Set(), // "slug/filename" keys
+  onTvSort: "newest",
+  onTvFilter: "all",
+  libSort: "newest",
+  libSearch: "",
 };
 
 const onTvSel = new GridSelection({ set: null, onChange: () => syncSelectionUi("on-tv") });
@@ -129,6 +133,16 @@ async function renderTvStatusCard() {
 
 /* ---- Left panel: what's on the TV ---- */
 
+function applySort(items, mode, dateOf, nameOf) {
+  const arr = [...items];
+  if (mode === "name") arr.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+  else {
+    arr.sort((a, b) => (dateOf(a) || "").localeCompare(dateOf(b) || ""));
+    if (mode === "newest") arr.reverse();
+  }
+  return arr;
+}
+
 async function refreshOnTv() {
   const grid = document.getElementById("on-tv-grid");
   grid.innerHTML = '<p class="panel-loading">Reading the TV…</p>';
@@ -149,15 +163,27 @@ async function refreshOnTv() {
 function renderOnTvGrid() {
   const art = tvView.art || { items: [], source: "cache" };
   document.getElementById("on-tv-stale").classList.toggle("hidden", art.source !== "cache");
+
+  let items = art.items;
+  if (tvView.onTvFilter !== "all") {
+    items = items.filter((i) => (tvView.onTvFilter === "matched") === i.matched);
+  }
+  items = applySort(
+    items,
+    tvView.onTvSort,
+    (i) => i.uploaded_at || i.image_date || "",
+    (i) => i.filename || i.content_id,
+  );
+
   const n = art.items.length;
   document.getElementById("on-tv-count").textContent = n
     ? `${n} image${n === 1 ? "" : "s"}`
     : "";
   const grid = document.getElementById("on-tv-grid");
   grid.innerHTML = "";
-  art.items.forEach((item) => grid.appendChild(onTvTileEl(item)));
+  items.forEach((item) => grid.appendChild(onTvTileEl(item)));
   document.getElementById("on-tv-empty").classList.toggle("hidden", n > 0);
-  onTvSel.setOrder(art.items.map((i) => i.content_id));
+  onTvSel.setOrder(items.map((i) => i.content_id));
   syncSelectionUi("on-tv");
 }
 
@@ -259,6 +285,7 @@ async function refreshLibraryPanel(rebuildFilter = false) {
         filename: im.filename,
         on_tv: im.on_tv,
         content_id: im.content_id ?? null,
+        prompt: im.prompt_short,
       }),
     );
   });
@@ -294,11 +321,20 @@ function libLightboxItems() {
 }
 
 function renderLibraryGrid() {
+  let images = tvView.libImages;
+  const q = tvView.libSearch.trim().toLowerCase();
+  if (q) {
+    images = images.filter((im) =>
+      [im.filename, im.theme_title, im.prompt || ""].some((s) => s.toLowerCase().includes(q)),
+    );
+  }
+  images = applySort(images, tvView.libSort, (im) => im.filename, (im) => im.filename);
+
   const grid = document.getElementById("library-grid");
   grid.innerHTML = "";
-  tvView.libImages.forEach((im) => grid.appendChild(libraryTileEl(im)));
-  document.getElementById("library-empty").classList.toggle("hidden", tvView.libImages.length > 0);
-  const selectable = tvView.libImages.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`);
+  images.forEach((im) => grid.appendChild(libraryTileEl(im)));
+  document.getElementById("library-empty").classList.toggle("hidden", images.length > 0);
+  const selectable = images.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`);
   libSel.setOrder(selectable);
   syncSelectionUi("library");
 }
@@ -451,6 +487,19 @@ function wireTvPanelButtons() {
     }
     btn.disabled = false;
   };
+
+  const bind = (id, key, rerender) => {
+    const el = document.getElementById(id);
+    el.value = tvView[key];
+    el.oninput = () => {
+      tvView[key] = el.value;
+      rerender();
+    };
+  };
+  bind("on-tv-sort", "onTvSort", renderOnTvGrid);
+  bind("on-tv-filter", "onTvFilter", renderOnTvGrid);
+  bind("library-sort", "libSort", renderLibraryGrid);
+  bind("library-search", "libSearch", renderLibraryGrid);
 }
 
 function renderTvPickers() {

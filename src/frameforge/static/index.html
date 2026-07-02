@@ -202,6 +202,16 @@
           <div class="panel-header">
             <h2 class="panel-title">On the TV</h2>
             <span class="panel-count" id="on-tv-count"></span>
+            <select class="panel-filter" id="on-tv-sort" aria-label="Sort">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">By name</option>
+            </select>
+            <select class="panel-filter" id="on-tv-filter" aria-label="Filter">
+              <option value="all">All</option>
+              <option value="matched">From my library</option>
+              <option value="unknown">Other sources</option>
+            </select>
             <div class="panel-actions">
               <button class="btn btn-ghost btn-small" id="on-tv-refresh" title="Re-read the art list from the TV">↻ Refresh</button>
               <button class="btn btn-ghost btn-small" id="on-tv-select-all">Select all</button>
@@ -226,6 +236,12 @@
           <div class="panel-header">
             <h2 class="panel-title">Your library</h2>
             <select class="panel-filter" id="library-theme-filter" aria-label="Filter by theme"></select>
+            <select class="panel-filter" id="library-sort" aria-label="Sort">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">By name</option>
+            </select>
+            <input type="search" class="panel-search" id="library-search" placeholder="Search" aria-label="Search library" />
             <div class="panel-actions">
               <button class="btn btn-secondary btn-small" id="library-import">+ Import</button>
               <input type="file" id="import-file-input" accept="image/*" multiple hidden />
