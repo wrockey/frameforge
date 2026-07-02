@@ -107,6 +107,73 @@ does not like parallel uploads. A 30-image push takes about a minute.
 
 `<library>` is `~/Pictures/FrameForge` unless you set `FRAMEFORGE_LIBRARY`.
 
+## `frameforge doctor`
+
+`frameforge doctor` (add `--read-only` to skip the upload/show/delete
+steps) runs the full connection lifecycle against a real Frame and prints
+one line per step. Findings from validating it against a real 2024 Frame
+(`QN43LS03DAFXZA`) on the local network:
+
+- **Discovery is fast and reliable.** `frameforge find` returned the TV
+  in well under the 4s default timeout — no changes needed to
+  `discover.py`'s SSDP logic or timeout for a 2024 Frame on a normal
+  home network.
+- **First contact needs a human at the TV.** If
+  `<library>/.frameforge_token` doesn't exist yet, the very first
+  `connect + status` call makes the TV pop an Allow/Deny prompt on
+  screen. Nobody has to click *within FrameForge* — the *TV itself* owns
+  a timeout for that dialog. If nobody answers the remote in time, the
+  TV closes the channel and sends back a bare
+  `{'event': 'ms.channel.timeOut'}`, which surfaces as:
+
+  ```
+  ✗ connect + status — {'event': 'ms.channel.timeOut'}
+  ```
+
+  This is not a bug in `tv_client.py` — no token file is written, and
+  retrying immediately just re-arms the same on-TV prompt (and re-times
+  out the same way if nobody's there). **Don't loop `frameforge doctor`
+  unattended hoping it'll eventually connect** — it won't, until someone
+  is at the TV to accept the prompt once. After that one accept, the
+  token is cached in `<library>/.frameforge_token` and every later
+  `doctor` run connects with no prompt.
+- Because `connect + status` gates every later step (`doctor.py` returns
+  early on that failure), an unattended first run can only ever validate
+  `resolve host` — `list art`, `fetch thumbnail`, and the mutating
+  upload/show/delete steps never execute until pairing has happened at
+  least once with a human present.
+
+### Sample transcript — first run, unattended (pairing not yet accepted)
+
+```
+$ frameforge doctor --read-only
+FrameForge doctor — checking the TV connection lifecycle:
+  ✓ resolve host — 192.168.1.253
+  ✗ connect + status — {'event': 'ms.channel.timeOut'}
+
+1 step(s) failed.
+```
+
+### Sample transcript — after pairing has been accepted once (expected, per the step sequence in `doctor.py`)
+
+```
+$ frameforge doctor
+FrameForge doctor — checking the TV connection lifecycle:
+  ✓ resolve host — 192.168.1.253
+  ✓ connect + status — art_mode=on
+  ✓ list art — 12 piece(s) on the TV
+  ✓ fetch thumbnail — 8421 bytes
+  ✓ upload test card — MY_F0123...
+  ✓ show test card
+  ✓ delete test card
+
+All steps passed.
+```
+
+Not yet independently confirmed end-to-end in this environment — validate
+this second transcript for real once someone is at the TV to accept the
+one-time pairing prompt, then remove this caveat.
+
 ## Still stuck?
 
 Run the server in the foreground (`frameforged`) and watch the log while
