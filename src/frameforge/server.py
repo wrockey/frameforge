@@ -837,7 +837,7 @@ async def recrop(filename: str, body: RecropRequest) -> dict:
         )
     except OriginalMissing as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except InvalidCrop as e:
+    except (InvalidImage, InvalidCrop) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {
         "slug": IMPORTED_SLUG,

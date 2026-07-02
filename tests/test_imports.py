@@ -150,3 +150,12 @@ def test_concurrent_imports_get_unique_filenames(cfg):
     for r in results:
         assert (d / r.filename).exists()
         assert (d / r.filename).with_suffix(".json").exists()
+
+
+def test_recrop_corrupt_original_raises_invalid_image(cfg):
+    data = _png_bytes(1600, 900)
+    r = import_image(cfg, data, "ok.png", None)
+    original = cfg.theme_dir(IMPORTED_SLUG) / "originals" / "ok.png"
+    original.write_bytes(b"corrupted, not an image")
+    with pytest.raises(InvalidImage):
+        recrop_image(cfg, r.filename, (0, 0, 1600, 900))

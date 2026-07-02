@@ -175,9 +175,12 @@ def recrop_image(
     if not original.exists():
         raise OriginalMissing(f"Original file for {filename} is gone")
 
-    img = Image.open(original)
-    img.load()
-    img = ImageOps.exif_transpose(img)
+    try:
+        img = Image.open(original)
+        img.load()
+        img = ImageOps.exif_transpose(img)
+    except (UnidentifiedImageError, OSError) as e:
+        raise InvalidImage(f"Original for {filename} is not a readable image: {e}")
     out = _crop_and_fit(img, crop)
     meta.update(
         {
