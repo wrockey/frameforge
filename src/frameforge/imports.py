@@ -9,12 +9,13 @@ leaves nothing user-visible.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from . import __version__
 from .config import Config
@@ -25,6 +26,14 @@ TARGET_W, TARGET_H = 3840, 2160
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _RATIO = 16 / 9
 _RATIO_TOLERANCE = 0.01
+
+# Guards the img_NNNN filename-assignment-and-write section (from
+# next_import_filename through _write_png_then_sidecar). The HTTP endpoint
+# runs import_image/recrop_image in threads; without this lock, two
+# concurrent imports can compute the same next filename and clobber each
+# other's PNG/sidecar. Validation and image decoding happen outside the
+# lock so failures never serialize concurrent requests.
+_write_lock = threading.Lock()
 
 
 class ImportTooLarge(Exception):
@@ -124,28 +133,33 @@ def import_image(
     try:
         img = Image.open(BytesIO(data))
         img.load()
+        img = ImageOps.exif_transpose(img)
     except (UnidentifiedImageError, OSError) as e:
         raise InvalidImage(f"Not a readable image: {e}")
 
     out = _crop_and_fit(img, crop)  # validate before touching disk
     theme_dir = cfg.theme_dir(IMPORTED_SLUG)
     theme_dir.mkdir(parents=True, exist_ok=True)
-    original_path = _save_original(theme_dir, original_name, data)
-    final_name = next_import_filename(theme_dir)
-    sidecar = {
-        "filename": final_name,
-        "theme": IMPORTED_TITLE,
-        "source": "imported",
-        "original_filename": original_path.name,
-        "imported_at": _now(),
-        "crop": (
-            {"x": crop[0], "y": crop[1], "w": crop[2], "h": crop[3]} if crop else None
-        ),
-        "width": out.width,
-        "height": out.height,
-        "frameforge_version": __version__,
-    }
-    _write_png_then_sidecar(theme_dir, final_name, out, sidecar)
+    # Filename assignment through write must be atomic w.r.t. other imports.
+    with _write_lock:
+        original_path = _save_original(theme_dir, original_name, data)
+        final_name = next_import_filename(theme_dir)
+        sidecar = {
+            "filename": final_name,
+            "theme": IMPORTED_TITLE,
+            "source": "imported",
+            "original_filename": original_path.name,
+            "imported_at": _now(),
+            "crop": (
+                {"x": crop[0], "y": crop[1], "w": crop[2], "h": crop[3]}
+                if crop
+                else None
+            ),
+            "width": out.width,
+            "height": out.height,
+            "frameforge_version": __version__,
+        }
+        _write_png_then_sidecar(theme_dir, final_name, out, sidecar)
     return ImportResult(final_name, original_path.name, out.width, out.height)
 
 
@@ -163,6 +177,7 @@ def recrop_image(
 
     img = Image.open(original)
     img.load()
+    img = ImageOps.exif_transpose(img)
     out = _crop_and_fit(img, crop)
     meta.update(
         {
@@ -172,5 +187,7 @@ def recrop_image(
             "recropped_at": _now(),
         }
     )
-    _write_png_then_sidecar(theme_dir, filename, out, meta)
+    # Same img_NNNN write section as import_image; guards concurrent recrops.
+    with _write_lock:
+        _write_png_then_sidecar(theme_dir, filename, out, meta)
     return ImportResult(filename, meta["original_filename"], out.width, out.height)

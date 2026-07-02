@@ -1,5 +1,6 @@
 """Import pipeline: crop math, validation, atomicity, originals."""
 import json
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pytest
@@ -20,6 +21,15 @@ from frameforge.imports import (
 def _png_bytes(w: int, h: int, color=(200, 120, 40)) -> bytes:
     buf = BytesIO()
     Image.new("RGB", (w, h), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _jpeg_with_orientation(w: int, h: int, orientation: int) -> bytes:
+    buf = BytesIO()
+    img = Image.new("RGB", (w, h), (10, 20, 30))
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    img.save(buf, format="JPEG", exif=exif)
     return buf.getvalue()
 
 
@@ -109,3 +119,34 @@ def test_recrop_from_original(cfg):
 def test_recrop_missing_raises(cfg):
     with pytest.raises(OriginalMissing):
         recrop_image(cfg, "img_9999.png", (0, 0, 1600, 900))
+
+
+def test_exif_orientation_normalized_before_crop(cfg):
+    # 400x200 sensor pixels, orientation 6 (90deg CW) means the image
+    # presents as 200x400 once transposed for display. crop=None should
+    # save the display-oriented image, not the raw sensor-oriented one.
+    data = _jpeg_with_orientation(400, 200, 6)
+    r = import_image(cfg, data, "phone.jpg", None)
+    out = Image.open(cfg.theme_dir(IMPORTED_SLUG) / r.filename)
+    assert (out.width, out.height) == (200, 400)
+
+
+def test_concurrent_imports_get_unique_filenames(cfg):
+    # Regression guard for the img_NNNN TOCTOU race: without a write lock
+    # this may pass by luck depending on scheduling, but exercises the
+    # concurrent path the HTTP endpoint relies on (threaded requests).
+    data = _png_bytes(1600, 900)
+
+    def _do(i):
+        return import_image(cfg, data, f"concurrent_{i}.png", None)
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(_do, range(8)))
+
+    filenames = [r.filename for r in results]
+    assert len(set(filenames)) == 8
+
+    d = cfg.theme_dir(IMPORTED_SLUG)
+    for r in results:
+        assert (d / r.filename).exists()
+        assert (d / r.filename).with_suffix(".json").exists()
