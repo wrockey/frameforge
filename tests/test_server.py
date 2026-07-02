@@ -49,6 +49,29 @@ def _build_fixture_library(tmp_path: Path) -> Path:
     return library_root
 
 
+def _add_imported_fixture(lib_root: Path) -> None:
+    """Add an imported-style entry: sidecar has no prompt/seed/generated_at."""
+    d = lib_root / "imported"
+    (d / "originals").mkdir(parents=True)
+    Image.new("RGB", (3840, 2160), color=(30, 60, 90)).save(d / "img_0001.png")
+    (d / "originals" / "sunset.jpg").write_bytes(b"fake-original")
+    (d / "img_0001.json").write_text(
+        json.dumps(
+            {
+                "filename": "img_0001.png",
+                "theme": "Imported",
+                "source": "imported",
+                "original_filename": "sunset.jpg",
+                "imported_at": "2026-07-01T10:00:00Z",
+                "crop": {"x": 0, "y": 128, "w": 4096, "h": 2304},
+                "width": 3840,
+                "height": 2160,
+                "frameforge_version": "0.1.0",
+            }
+        )
+    )
+
+
 @pytest.fixture
 def app_with_fixture(tmp_path, monkeypatch):
     """Return a TestClient with FRAMEFORGE_LIBRARY pointed at a fixture."""
@@ -56,6 +79,20 @@ def app_with_fixture(tmp_path, monkeypatch):
     monkeypatch.setenv("FRAMEFORGE_LIBRARY", str(lib_root))
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     # Re-import to pick up env
+    import importlib
+
+    import frameforge.server as server_mod
+
+    importlib.reload(server_mod)
+    return TestClient(server_mod.app), lib_root
+
+
+@pytest.fixture
+def app_with_imported(tmp_path, monkeypatch):
+    lib_root = _build_fixture_library(tmp_path)
+    _add_imported_fixture(lib_root)
+    monkeypatch.setenv("FRAMEFORGE_LIBRARY", str(lib_root))
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
     import importlib
 
     import frameforge.server as server_mod
@@ -446,3 +483,40 @@ def test_tv_host_env_override_flagged(app_with_tv):
 def test_tv_host_empty_rejected(app_with_tv):
     client, _ = app_with_tv
     assert client.put("/api/tv/host", json={"host": "   "}).status_code == 400
+
+
+# ----- Imported image sidecars (no prompt/seed/generated_at) ------------------
+
+
+def test_themes_list_includes_imported(app_with_imported):
+    client, _ = app_with_imported
+    cards = client.get("/api/themes").json()
+    imported = next(c for c in cards if c["slug"] == "imported")
+    assert imported["title"] == "Imported"
+    assert imported["image_count"] == 1
+    assert imported["last_refreshed"] == "2026-07-01T10:00:00Z"  # from imported_at
+
+
+def test_imported_theme_detail_uses_original_filename(app_with_imported):
+    client, _ = app_with_imported
+    r = client.get("/api/themes/imported")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["images"][0]["prompt_short"] == "sunset.jpg"
+    # expansion never populates for imported themes, even when asked
+    r2 = client.get("/api/themes/imported?with_expansion=true")
+    assert r2.status_code == 200 and r2.json()["expansion"] is None
+
+
+def test_imported_inspect_and_manifest(app_with_imported):
+    client, lib_root = app_with_imported
+    r = client.get("/api/themes/imported/images/img_0001.png/inspect")
+    assert r.status_code == 200
+    assert r.json()["prompt"] == "sunset.jpg"
+
+    from frameforge.config import Config
+    from frameforge.library import Library
+
+    lib = Library(Config(library_root=lib_root))
+    manifest = lib.write_manifest("imported")
+    assert "img_0001.png" in manifest.read_text()

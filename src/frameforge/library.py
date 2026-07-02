@@ -91,15 +91,15 @@ class Library:
                 m = entry.load_meta()
                 writer.writerow(
                     [
-                        m["filename"],
-                        m["theme"],
-                        m["prompt"],
-                        m["expansion_seed"],
-                        m["image_model"],
-                        m["resolution"],
-                        m["aspect_ratio"],
-                        m["generated_at"],
-                        m["frameforge_version"],
+                        m.get("filename", ""),
+                        m.get("theme", ""),
+                        m.get("prompt", ""),
+                        m.get("expansion_seed", ""),
+                        m.get("image_model", ""),
+                        m.get("resolution", ""),
+                        m.get("aspect_ratio", ""),
+                        m.get("generated_at") or m.get("imported_at", ""),
+                        m.get("frameforge_version", ""),
                     ]
                 )
         return manifest_path

@@ -205,7 +205,10 @@ def _last_refreshed_iso(library: Library, slug: str) -> Optional[str]:
     times = []
     for e in entries:
         try:
-            times.append(e.load_meta()["generated_at"])
+            m = e.load_meta()
+            t = m.get("generated_at") or m.get("imported_at")
+            if t:
+                times.append(t)
         except Exception:
             continue
     return max(times) if times else None
@@ -285,31 +288,31 @@ def theme_detail(slug: str, with_expansion: bool = False) -> ThemeDetail:
         tiles.append(
             ImageTile(
                 filename=meta["filename"],
-                prompt_short=_short_prompt(meta["prompt"]),
+                prompt_short=_short_prompt(meta.get("prompt") or meta.get("original_filename", "")),
                 on_tv=library.is_on_tv(e.image_path),
                 content_id=library.tv_content_id(e.image_path),
             )
         )
 
     expansion_payload = None
-    if with_expansion:
+    if with_expansion and "expansion_seed" in first_meta:
         # Reconstruct expansion data from the sidecars themselves — cheaper than
         # storing a separate expansion record, and equally reproducible.
-        prompts = [e.load_meta()["prompt"] for e in entries]
+        prompts = [e.load_meta().get("prompt", "") for e in entries]
         expansion_payload = {
-            "theme": first_meta["theme"],
+            "theme": first_meta.get("theme", slug),
             "seed": first_meta["expansion_seed"],
             "count": len(prompts),
             "prompts": prompts,
             "text_model": first_meta.get("text_model_for_expansion", cfg.text_model),
-            "generated_at": first_meta["generated_at"],
-            "frameforge_version": first_meta["frameforge_version"],
+            "generated_at": first_meta.get("generated_at", ""),
+            "frameforge_version": first_meta.get("frameforge_version", ""),
         }
 
     on_tv_for_theme = library.list_tv_uploads(slug)
     return ThemeDetail(
         slug=slug,
-        title=first_meta["theme"],
+        title=first_meta.get("theme", slug),
         image_count=len(entries),
         last_refreshed=_last_refreshed_iso(library, slug),
         size_mb=_theme_size_mb(library, slug),
@@ -343,7 +346,7 @@ def inspect_image(slug: str, filename: str) -> InspectPayload:
     sidecar = json.loads(sidecar_path.read_text())
     return InspectPayload(
         filename=filename,
-        prompt=sidecar["prompt"],
+        prompt=sidecar.get("prompt") or sidecar.get("original_filename", ""),
         sidecar=sidecar,
         on_tv=library.is_on_tv(image_path),
         regen_count=0,  # bookkept in a future iteration
