@@ -208,6 +208,10 @@
               <button class="btn btn-small btn-danger-solid" id="on-tv-remove" disabled>Remove from TV</button>
             </div>
           </div>
+          <div class="selection-bar hidden" id="on-tv-selection-bar">
+            <span id="on-tv-selection-count"></span>
+            <button class="btn btn-ghost btn-small" id="on-tv-clear-sel">Clear</button>
+          </div>
           <p class="panel-note hidden" id="on-tv-stale">
             TV unreachable — showing the last known state. <button class="btn-link" id="on-tv-retry">Retry</button>
           </p>
@@ -228,6 +232,10 @@
               <button class="btn btn-ghost btn-small" id="library-select-all">Select all</button>
               <button class="btn btn-primary btn-small" id="library-upload" disabled>Upload to TV</button>
             </div>
+          </div>
+          <div class="selection-bar hidden" id="library-selection-bar">
+            <span id="library-selection-count"></span>
+            <button class="btn btn-ghost btn-small" id="library-clear-sel">Clear</button>
           </div>
           <div class="art-grid" id="library-grid"></div>
           <p class="panel-empty hidden" id="library-empty">

@@ -1166,6 +1166,17 @@ main {
   margin: 0 0 12px;
 }
 
+.selection-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: rgba(138, 90, 43, 0.08);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
 .panel-empty,
 .panel-loading {
   color: var(--ink-50);

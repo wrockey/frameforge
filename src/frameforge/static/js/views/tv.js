@@ -3,6 +3,7 @@ import { escapeHtml, relativeTime } from "../util.js";
 import { pollTvHealth, tvActionError } from "../tvhealth.js";
 import { importWithCrop } from "../crop.js";
 import { openLightbox } from "../lightbox.js";
+import { GridSelection, attachTilePointerHandlers } from "../selection.js";
 
 /* ===========================================================================
  * TV screen
@@ -33,13 +34,30 @@ export const tvView = {
   selLib: new Set(), // "slug/filename" keys
 };
 
+const onTvSel = new GridSelection({ set: null, onChange: () => syncSelectionUi("on-tv") });
+const libSel = new GridSelection({ set: null, onChange: () => syncSelectionUi("library") });
+
 export async function renderTV() {
   tvView.selOnTv.clear();
   tvView.selLib.clear();
+  onTvSel.set = tvView.selOnTv;
+  libSel.set = tvView.selLib;
   renderTvPickers();
   wireTvPanelButtons();
   renderTvStatusCard();
   await Promise.all([refreshOnTv(), refreshLibraryPanel(true)]);
+}
+
+function syncSelectionUi(panel) {
+  const sel = panel === "on-tv" ? tvView.selOnTv : tvView.selLib;
+  const bar = document.getElementById(`${panel}-selection-bar`);
+  const count = document.getElementById(`${panel}-selection-count`);
+  bar.classList.toggle("hidden", sel.size === 0);
+  count.textContent = `${sel.size} selected`;
+  document
+    .querySelectorAll(`#${panel === "on-tv" ? "on-tv-grid" : "library-grid"} .art-tile`)
+    .forEach((el) => el.classList.toggle("selected", sel.has(el.dataset.key)));
+  updateTvActionButtons();
 }
 
 async function renderTvStatusCard() {
@@ -122,7 +140,9 @@ async function refreshOnTv() {
   }
   tvView.art = art;
   const ids = new Set(art.items.map((i) => i.content_id));
-  tvView.selOnTv = new Set([...tvView.selOnTv].filter((id) => ids.has(id)));
+  [...tvView.selOnTv].forEach((id) => {
+    if (!ids.has(id)) tvView.selOnTv.delete(id);
+  });
   renderOnTvGrid();
 }
 
@@ -137,7 +157,8 @@ function renderOnTvGrid() {
   grid.innerHTML = "";
   art.items.forEach((item) => grid.appendChild(onTvTileEl(item)));
   document.getElementById("on-tv-empty").classList.toggle("hidden", n > 0);
-  updateTvActionButtons();
+  onTvSel.setOrder(art.items.map((i) => i.content_id));
+  syncSelectionUi("on-tv");
 }
 
 function onTvLightboxItems() {
@@ -163,6 +184,7 @@ function onTvLightboxItems() {
 function onTvTileEl(item) {
   const el = document.createElement("div");
   el.className = "art-tile";
+  el.dataset.key = item.content_id;
   const caption = item.matched
     ? `${item.theme_title} · ${item.filename}`
     : "Uploaded outside FrameForge";
@@ -177,18 +199,10 @@ function onTvTileEl(item) {
     </div>
     <div class="art-caption ${item.matched ? "" : "art-caption-dim"}">${escapeHtml(caption)}</div>
   `;
-  const sync = () => el.classList.toggle("selected", tvView.selOnTv.has(item.content_id));
-  el.onclick = (e) => {
-    if (e.target.closest("[data-act]")) return;
-    if (tvView.selOnTv.has(item.content_id)) tvView.selOnTv.delete(item.content_id);
-    else tvView.selOnTv.add(item.content_id);
-    sync();
-    updateTvActionButtons();
-  };
-  el.ondblclick = () => {
+  attachTilePointerHandlers(el, item.content_id, onTvSel, () => {
     const i = (tvView.art?.items ?? []).findIndex((x) => x.content_id === item.content_id);
     openLightbox(onTvLightboxItems(), Math.max(0, i));
-  };
+  });
   const showBtn = el.querySelector('[data-act="show"]');
   if (showBtn) {
     showBtn.onclick = async (e) => {
@@ -207,7 +221,7 @@ function onTvTileEl(item) {
       }
     };
   }
-  sync();
+  el.classList.toggle("selected", tvView.selOnTv.has(item.content_id));
   return el;
 }
 
@@ -252,7 +266,9 @@ async function refreshLibraryPanel(rebuildFilter = false) {
   const selectable = new Set(
     images.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`),
   );
-  tvView.selLib = new Set([...tvView.selLib].filter((k) => selectable.has(k)));
+  [...tvView.selLib].forEach((k) => {
+    if (!selectable.has(k)) tvView.selLib.delete(k);
+  });
   renderLibraryGrid();
 }
 
@@ -282,34 +298,32 @@ function renderLibraryGrid() {
   grid.innerHTML = "";
   tvView.libImages.forEach((im) => grid.appendChild(libraryTileEl(im)));
   document.getElementById("library-empty").classList.toggle("hidden", tvView.libImages.length > 0);
-  updateTvActionButtons();
+  const selectable = tvView.libImages.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`);
+  libSel.setOrder(selectable);
+  syncSelectionUi("library");
 }
 
 function libraryTileEl(im) {
   const key = `${im.slug}/${im.filename}`;
   const el = document.createElement("div");
   el.className = "art-tile" + (im.on_tv ? " art-tile-on-tv" : "");
+  el.dataset.key = key;
   el.innerHTML = `
     <div class="art-thumb" style="background-image:url('${api.imageUrl(im.slug, im.filename)}')">
       ${im.on_tv ? '<span class="pill pill-on-tv art-badge">ON TV</span>' : '<span class="sel-box" aria-hidden="true"></span>'}
     </div>
     <div class="art-caption">${escapeHtml(im.theme_title)} · ${escapeHtml(im.filename)}</div>
   `;
-  el.ondblclick = () => {
+  const openViewer = () => {
     const i = tvView.libImages.findIndex((x) => x.slug === im.slug && x.filename === im.filename);
     openLightbox(libLightboxItems(), Math.max(0, i));
   };
   if (im.on_tv) {
     el.title = "Already on the TV — remove it from the left panel";
+    el.ondblclick = openViewer;
   } else {
-    const sync = () => el.classList.toggle("selected", tvView.selLib.has(key));
-    el.onclick = () => {
-      if (tvView.selLib.has(key)) tvView.selLib.delete(key);
-      else tvView.selLib.add(key);
-      sync();
-      updateTvActionButtons();
-    };
-    sync();
+    attachTilePointerHandlers(el, key, libSel, openViewer);
+    el.classList.toggle("selected", tvView.selLib.has(key));
   }
   return el;
 }
@@ -368,18 +382,19 @@ function wireTvPanelButtons() {
   };
 
   document.getElementById("on-tv-select-all").onclick = () => {
-    const items = tvView.art?.items ?? [];
-    if (tvView.selOnTv.size === items.length) tvView.selOnTv.clear();
-    else items.forEach((i) => tvView.selOnTv.add(i.content_id));
-    renderOnTvGrid();
+    const ids = (tvView.art?.items ?? []).map((i) => i.content_id);
+    if (tvView.selOnTv.size === ids.length) onTvSel.clear();
+    else onTvSel.selectAll(ids);
   };
 
   document.getElementById("library-select-all").onclick = () => {
-    const selectable = tvView.libImages.filter((im) => !im.on_tv);
-    if (tvView.selLib.size === selectable.length) tvView.selLib.clear();
-    else selectable.forEach((im) => tvView.selLib.add(`${im.slug}/${im.filename}`));
-    renderLibraryGrid();
+    const selectable = tvView.libImages.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`);
+    if (tvView.selLib.size === selectable.length) libSel.clear();
+    else libSel.selectAll(selectable);
   };
+
+  document.getElementById("on-tv-clear-sel").onclick = () => onTvSel.clear();
+  document.getElementById("library-clear-sel").onclick = () => libSel.clear();
 
   document.getElementById("on-tv-remove").onclick = async () => {
     const ids = [...tvView.selOnTv];
