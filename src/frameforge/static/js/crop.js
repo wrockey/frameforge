@@ -50,7 +50,10 @@ function loadImage(file) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => resolve({ img, url });
-    img.onerror = () => reject(new Error(`${file.name} is not a readable image`));
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`${file.name} is not a readable image`));
+    };
     img.src = url;
   });
 }
@@ -61,7 +64,6 @@ function loadImage(file) {
 function presentCrop(file, natW, natH, url, queueText) {
   const imgEl = sheet.querySelector("#crop-img");
   const rectEl = sheet.querySelector("#crop-rect");
-  const stage = sheet.querySelector("#crop-stage");
   imgEl.src = url;
   sheet.querySelector("#crop-filename").textContent = file.name;
   sheet.querySelector("#crop-queue").textContent = queueText;
@@ -140,6 +142,7 @@ export async function importWithCrop(files) {
 
   const imported = [];
   let centerRest = false;
+  const failures = [];
   const errEl = () => sheet.querySelector("#crop-error");
 
   for (let i = 0; i < list.length; i++) {
@@ -148,6 +151,7 @@ export async function importWithCrop(files) {
     try {
       loaded = await loadImage(file);
     } catch (e) {
+      failures.push(e.message);
       errEl().textContent = e.message;
       errEl().classList.remove("hidden");
       continue;
@@ -173,9 +177,14 @@ export async function importWithCrop(files) {
       const r = await api.importImage(file, choice);
       imported.push({ slug: r.slug, filename: r.filename });
     } catch (e) {
+      failures.push(`${file.name}: ${e.message || e}`);
       errEl().textContent = `${file.name}: ${e.message || e}`;
       errEl().classList.remove("hidden");
     }
+  }
+
+  if (failures.length) {
+    alert(`${failures.length} file(s) could not be imported:\n` + failures.join("\n"));
   }
 
   const sendToTv = sheet.querySelector("#crop-send-tv").checked;
