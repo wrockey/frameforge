@@ -50,5 +50,21 @@ def cycle(theme: str, count: int | None, minutes: int) -> None:
     run_cycle(Config(), theme, count, minutes)
 
 
+@cli.command()
+@click.option("--host", default=None, help="TV IP (defaults to the configured host).")
+@click.option("--read-only", is_flag=True, help="Skip the upload/show/delete steps.")
+def doctor(host: str | None, read_only: bool) -> None:
+    """Check the TV connection lifecycle step by step."""
+    from .doctor import run_doctor
+
+    click.echo("FrameForge doctor — checking the TV connection lifecycle:")
+    results = run_doctor(Config(), host=host, mutate=not read_only, echo=click.echo)
+    failed = [r for r in results if not r.ok]
+    if failed:
+        click.echo(f"\n{len(failed)} step(s) failed.")
+        raise SystemExit(1)
+    click.echo("\nAll steps passed.")
+
+
 if __name__ == "__main__":
     cli()
