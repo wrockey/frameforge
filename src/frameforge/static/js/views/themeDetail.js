@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import { escapeHtml, relativeTime } from "../util.js";
 import { tvView } from "./tv.js";
 import { openInspect } from "./inspect.js";
+import { openLightbox } from "../lightbox.js";
 
 /* ===========================================================================
  * Theme detail
@@ -76,6 +77,16 @@ function imageTileEl(slug, img) {
     </div>
     <div class="image-tile-caption">${escapeHtml(img.prompt_short)}</div>
   `;
+  el.ondblclick = () => {
+    if (!currentDetail) return;
+    const items = currentDetail.images.map((im) => ({
+      src: api.imageUrl(slug, im.filename),
+      caption: im.filename,
+      meta: im.prompt_short,
+    }));
+    const i = currentDetail.images.findIndex((x) => x.filename === img.filename);
+    openLightbox(items, Math.max(0, i));
+  };
   el.querySelector('[data-act="inspect"]').onclick = () => openInspect(slug, img.filename);
   el.querySelector('[data-act="toggle"]').onclick = async (e) => {
     e.stopPropagation();

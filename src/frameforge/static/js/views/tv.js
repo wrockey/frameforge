@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import { escapeHtml, relativeTime } from "../util.js";
 import { pollTvHealth, tvActionError } from "../tvhealth.js";
 import { importWithCrop } from "../crop.js";
+import { openLightbox } from "../lightbox.js";
 
 /* ===========================================================================
  * TV screen
@@ -139,6 +140,26 @@ function renderOnTvGrid() {
   updateTvActionButtons();
 }
 
+function onTvLightboxItems() {
+  const items = tvView.art?.items ?? [];
+  return items.map((item) => ({
+    src: item.matched && item.theme_slug
+      ? api.imageUrl(item.theme_slug, item.filename)
+      : api.thumbUrl(item.thumbnail_url),
+    caption: item.matched ? `${item.theme_title} · ${item.filename}` : "Uploaded outside FrameForge",
+    meta: item.is_current ? "Now showing" : (item.uploaded_at ? `Uploaded ${item.uploaded_at}` : ""),
+    actions: item.is_current ? [] : [
+      {
+        label: "Show on TV now",
+        onClick: async () => {
+          await api.tvSelect({ content_id: item.content_id });
+          await refreshOnTv();
+        },
+      },
+    ],
+  }));
+}
+
 function onTvTileEl(item) {
   const el = document.createElement("div");
   el.className = "art-tile";
@@ -163,6 +184,10 @@ function onTvTileEl(item) {
     else tvView.selOnTv.add(item.content_id);
     sync();
     updateTvActionButtons();
+  };
+  el.ondblclick = () => {
+    const i = (tvView.art?.items ?? []).findIndex((x) => x.content_id === item.content_id);
+    openLightbox(onTvLightboxItems(), Math.max(0, i));
   };
   const showBtn = el.querySelector('[data-act="show"]');
   if (showBtn) {
@@ -231,6 +256,27 @@ async function refreshLibraryPanel(rebuildFilter = false) {
   renderLibraryGrid();
 }
 
+function libLightboxItems() {
+  return tvView.libImages.map((im) => ({
+    src: api.imageUrl(im.slug, im.filename),
+    caption: `${im.theme_title} · ${im.filename}`,
+    meta: im.on_tv ? "On the TV" : "",
+    actions: im.on_tv ? [] : [
+      {
+        label: "Upload to TV",
+        onClick: async () => {
+          await api.tvUpload({
+            items: [{ slug: im.slug, filename: im.filename }],
+            matte: tvView.matte,
+            matte_color: tvView.matteColor,
+          });
+          await Promise.all([refreshOnTv(), refreshLibraryPanel(false)]);
+        },
+      },
+    ],
+  }));
+}
+
 function renderLibraryGrid() {
   const grid = document.getElementById("library-grid");
   grid.innerHTML = "";
@@ -249,6 +295,10 @@ function libraryTileEl(im) {
     </div>
     <div class="art-caption">${escapeHtml(im.theme_title)} · ${escapeHtml(im.filename)}</div>
   `;
+  el.ondblclick = () => {
+    const i = tvView.libImages.findIndex((x) => x.slug === im.slug && x.filename === im.filename);
+    openLightbox(libLightboxItems(), Math.max(0, i));
+  };
   if (im.on_tv) {
     el.title = "Already on the TV — remove it from the left panel";
   } else {
