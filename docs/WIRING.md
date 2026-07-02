@@ -170,6 +170,64 @@ Fetch: `GET /api/themes/{slug}/images/{filename}/inspect` → `InspectPayload`.
   - Matte style + color pickers → applied to subsequent uploads
     (`matte`/`matte_color` fields on the upload/push bodies).
 
+## Image imports (TV screen → library panel)
+
+Drag-drop onto the library panel, or the **+ Import** button, queues files
+through a client-side 16:9 crop sheet (`crop.js`) before they land in the
+library as ordinary images under the reserved `imported` theme slug —
+`imported` is not a user-choosable theme name; it shows up in
+`GET /api/themes` and `GET /api/themes/{slug}` like any generated theme.
+
+### `POST /api/imports`
+
+`multipart/form-data`:
+
+| Field                            | Required | Notes                                                       |
+|-----------------------------------|----------|--------------------------------------------------------------|
+| `file`                            | yes      | any format Pillow can decode; EXIF orientation is normalized before crop |
+| `crop_x`, `crop_y`, `crop_w`, `crop_h` | all-or-nothing | form ints, in source-image pixels; omit all four to import uncropped |
+
+An image that's already 16:9 within 1% tolerance is used as-is (or, if
+larger than 3840×2160, downsized to it); otherwise the given crop is
+applied. FrameForge never upscales past 3840×2160.
+
+Response `200`:
+
+```json
+{
+  "slug": "imported",
+  "filename": "img_0007.png",
+  "original_filename": "beach.jpg",
+  "width": 3840,
+  "height": 2160
+}
+```
+
+Errors:
+- `400` — some but not all of `crop_x/y/w/h` given; crop rectangle outside
+  the image bounds; crop rectangle not 16:9; file isn't a readable image.
+- `413` — file exceeds the 50 MB cap.
+
+The untouched upload is preserved at `imported/originals/<name>` (suffixed
+on filename collision) so a later recrop never loses quality.
+
+### `POST /api/imports/{filename}/recrop`
+
+JSON body: `{"crop_x": int, "crop_y": int, "crop_w": int, "crop_h": int}` —
+re-crops from the preserved original and overwrites the same `filename` in
+place.
+
+Response `200`: `{"slug": "imported", "filename": ..., "width": ..., "height": ...}`
+
+Errors:
+- `404` — no imported image with that filename, or its original file is
+  gone.
+- `400` — crop rectangle out of bounds or not 16:9, or the original is no
+  longer a readable image.
+
+Not wired into the UI yet beyond the API — recrop is a future affordance
+(by design). Exercise it with `curl` if you need it today.
+
 ## Schedule screen
 
 *Roadmap.* Scheduling is delegated to launchd on macOS, so the schedule
@@ -198,29 +256,21 @@ The weekly calendar visualization on the design is purely a render of the
 
 ## Static image serving
 
-Add to `server.py` if not yet present:
-
-```python
-from fastapi.staticfiles import StaticFiles
-app.mount(
-    "/api/themes/{slug}/images",  # served via dynamic route, not StaticFiles
-    ...
-)
-```
-
-For now, the `theme_detail` route returns filenames only; add a thin handler:
+Implemented as a thin route in `server.py`:
 
 ```python
 @app.get("/api/themes/{slug}/images/{filename}")
-def serve_image(slug: str, filename: str):
+def serve_image(slug: str, filename: str) -> FileResponse:
     cfg = Config()
     p = cfg.theme_dir(slug) / filename
     if not p.exists():
-        raise HTTPException(404)
+        raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(p)
 ```
 
-(This is in the next commit — see roadmap.)
+The web UI itself (`src/frameforge/static/`) is mounted at `/` via
+`StaticFiles(..., html=True)`, registered *after* every `/api` and `/ws`
+route so those take precedence over the catch-all static mount.
 
 ## Roadmap items called out above
 

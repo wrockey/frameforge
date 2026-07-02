@@ -83,9 +83,14 @@ sidecar JSON of the specific image used. See `docs/REPRODUCIBILITY.md`.
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # 15 tests
+pytest                              # 56 tests
 ruff check src/                     # lint
 ```
+
+`frameforge doctor` runs the connect → list → thumbnail → upload → show →
+delete lifecycle against a real Frame and reports pass/fail per step — the
+one check that can't run in CI, since it needs a TV on the network. See
+[Troubleshooting](docs/TROUBLESHOOTING.md#frameforge-doctor).
 
 ## Scheduling automatic refreshes (macOS)
 
@@ -129,6 +134,18 @@ The web UI's **TV** screen is a two-panel manager:
 
 Each theme's detail grid also has a per-image **+ / −** toggle to send a
 single image to the TV or pull it off.
+
+### Importing your own images
+
+Drag files onto the **Your library** panel, or click **+ Import**, to add
+your own photos alongside generated art. Anything not already 16:9 opens a
+crop sheet: drag to reposition, use the corner handle to resize (locked to
+16:9); *Skip* it, *Keep original* (the Frame mattes it into 16:9 instead of
+cropping), or *Center-crop the rest* to apply the same treatment to
+everything left in the batch. Check *Send to TV after import* to upload as
+soon as the batch finishes. Imports land in a reserved `imported`
+collection; the untouched original is kept at `imported/originals/` so a
+later re-crop never loses quality.
 
 ## Using the UI from your phone
 

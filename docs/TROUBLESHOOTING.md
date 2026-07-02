@@ -39,8 +39,10 @@ The allow/deny prompt only appears the first time FrameForge connects.
 The On-the-TV panel couldn't reach the TV.
 
 - TV fully powered off (not art mode / standby)? Turn it on.
-- TV got a new IP from DHCP? Re-run *Find your TV* from onboarding, or fix
-  the address with a DHCP reservation.
+- TV got a new IP from DHCP? Click **Find my TV again** on the unreachable
+  TV card (TV screen) — it re-runs discovery and saves the new address, no
+  re-pairing needed if it's the same TV. Or fix the address for good with a
+  DHCP reservation.
 - The saved host is in `<library>/settings.json`; the `FRAMEFORGE_TV_HOST`
   env var overrides it — if you set that once in `.env` and the TV moved,
   update or remove it there.
@@ -95,6 +97,20 @@ reports `"auth_required": true` so clients can tell.)
 Normal: images are converted to high-quality JPEG and pushed over the
 TV's websocket at roughly a second or two each, sequentially — the Frame
 does not like parallel uploads. A 30-image push takes about a minute.
+
+## Imports fail
+
+- **413, "exceeds the 50 MB cap"** — the file itself is over the size
+  limit (the whole upload is read into memory before cropping). Re-export
+  or downsize it and try again.
+- **400, "Not a readable image"** — the file isn't an image format Pillow
+  can decode, or it's corrupt. Re-save it (e.g. re-export as JPEG/PNG) and
+  retry.
+- **400, "Crop ... is not 16:9" / "outside image bounds"** — the crop
+  sheet in the UI always sends a valid 16:9 rectangle, so this only shows
+  up when calling `POST /api/imports` directly; check the crop math.
+- **400, "Provide all of crop_x/y/w/h, or none"** — same, API-only: the
+  four crop fields are all-or-nothing.
 
 ## Where state lives (for surgical resets)
 
@@ -173,6 +189,13 @@ All steps passed.
 Not yet independently confirmed end-to-end in this environment — validate
 this second transcript for real once someone is at the TV to accept the
 one-time pairing prompt, then remove this caveat.
+
+**Pending validation** (do this next time someone's at the TV remote):
+1. Run `frameforge doctor` and accept the pairing prompt on the TV.
+2. UI pass: import an image → *Send to TV* → confirm it's on the wall →
+   *Show on TV now* from the lightbox → *Remove from TV* via selection.
+3. iPhone PWA pass: crop-sheet touch drag/resize, long-press to enter
+   selection mode, lightbox swipe navigation.
 
 ## Still stuck?
 
