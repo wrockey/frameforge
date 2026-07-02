@@ -615,3 +615,25 @@ def test_recrop_unknown_404(app_with_fixture):
         json={"crop_x": 0, "crop_y": 0, "crop_w": 1600, "crop_h": 900},
     )
     assert r.status_code == 404
+
+
+def test_generate_reserved_slug_400(app_with_fixture):
+    """The 'imported' slug is reserved and cannot be generated into."""
+    client, _ = app_with_fixture
+    r = client.post(
+        "/api/themes/imported/generate",
+        json={"theme": "Imported", "count": 2},
+    )
+    assert r.status_code == 400
+
+
+def test_image_routes_reject_dot_segments(app_with_fixture):
+    """Dot-segment slugs/filenames must not resolve to files (dotfile reads, traversal)."""
+    client, _ = app_with_fixture
+    r = client.get("/api/themes/./images/.frameforge_token")
+    assert r.status_code == 404
+
+    r2 = client.get("/api/themes/../images/x.png")
+    # TestClient may normalize ".." away before it reaches routing; either way
+    # this must not succeed or leak file content.
+    assert r2.status_code != 200

@@ -9,6 +9,10 @@ import { GridSelection, attachTilePointerHandlers } from "../selection.js";
  * TV screen
  * ========================================================================= */
 
+// Original copy in index.html's #on-tv-empty, used when the TV genuinely has
+// no art (as opposed to a filter/search hiding everything that's there).
+const ON_TV_EMPTY_DEFAULT = "Nothing on the TV yet. Select images on the right and upload them.";
+
 const MATTE_STYLES = ["shadowbox", "neat", "panoramic", "wide", "double", "triple", "single", "thin"];
 const MATTE_COLORS = [
   ["polar", "#f5f1e8"],
@@ -81,7 +85,10 @@ async function renderTvStatusCard() {
         <button class="btn btn-secondary" id="tv-retry">Retry</button>
         <button class="btn btn-primary" id="tv-rediscover">Find my TV again</button>
       </div>`;
-    document.getElementById("tv-retry").onclick = () => renderTV();
+    document.getElementById("tv-retry").onclick = async () => {
+      await pollTvHealth();
+      renderTV();
+    };
     document.getElementById("tv-rediscover").onclick = async () => {
       const btn = document.getElementById("tv-rediscover");
       btn.disabled = true;
@@ -94,6 +101,7 @@ async function renderTvStatusCard() {
           return;
         }
         await api.setTvHost(frame.host);
+        await pollTvHealth();
         renderTV();
       } catch (err) {
         alert(`Discovery failed: ${tvActionError(err)}`);
@@ -191,14 +199,19 @@ function renderOnTvGrid() {
     };
   }
 
-  const n = art.items.length;
+  const n = items.length;
   document.getElementById("on-tv-count").textContent = n
     ? `${n} image${n === 1 ? "" : "s"}`
     : "";
   const grid = document.getElementById("on-tv-grid");
   grid.innerHTML = "";
   items.forEach((item) => grid.appendChild(onTvTileEl(item)));
-  document.getElementById("on-tv-empty").classList.toggle("hidden", n > 0);
+  const emptyEl = document.getElementById("on-tv-empty");
+  emptyEl.classList.toggle("hidden", n > 0);
+  emptyEl.textContent =
+    n === 0 && art.items.length > 0
+      ? "No images match the current filter."
+      : ON_TV_EMPTY_DEFAULT;
   onTvSel.setOrder(items.map((i) => i.content_id));
   syncSelectionUi("on-tv");
 }
@@ -434,15 +447,15 @@ function wireTvPanelButtons() {
   };
 
   document.getElementById("on-tv-select-all").onclick = () => {
-    const ids = (tvView.art?.items ?? []).map((i) => i.content_id);
-    if (tvView.selOnTv.size === ids.length) onTvSel.clear();
-    else onTvSel.selectAll(ids);
+    const order = onTvSel.order;
+    if (order.length && order.every((k) => tvView.selOnTv.has(k))) onTvSel.clear();
+    else onTvSel.selectAll(order);
   };
 
   document.getElementById("library-select-all").onclick = () => {
-    const selectable = tvView.libImages.filter((im) => !im.on_tv).map((im) => `${im.slug}/${im.filename}`);
-    if (tvView.selLib.size === selectable.length) libSel.clear();
-    else libSel.selectAll(selectable);
+    const order = libSel.order;
+    if (order.length && order.every((k) => tvView.selLib.has(k))) libSel.clear();
+    else libSel.selectAll(order);
   };
 
   document.getElementById("on-tv-clear-sel").onclick = () => onTvSel.clear();

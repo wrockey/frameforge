@@ -336,6 +336,8 @@ def theme_detail(slug: str, with_expansion: bool = False) -> ThemeDetail:
 @app.get("/api/themes/{slug}/images/{filename}")
 def serve_image(slug: str, filename: str) -> FileResponse:
     """Raw image bytes for the theme cards' mosaic and the detail grid."""
+    if slug.startswith(".") or filename.startswith("."):
+        raise HTTPException(status_code=404, detail="Image not found")
     cfg = Config()
     p = cfg.theme_dir(slug) / filename
     if not p.exists():
@@ -346,6 +348,8 @@ def serve_image(slug: str, filename: str) -> FileResponse:
 @app.get("/api/themes/{slug}/images/{filename}/inspect", response_model=InspectPayload)
 def inspect_image(slug: str, filename: str) -> InspectPayload:
     """Image inspect side sheet contents."""
+    if slug.startswith(".") or filename.startswith("."):
+        raise HTTPException(status_code=404, detail="Image not found")
     cfg = Config()
     library = Library(cfg)
     image_path = cfg.theme_dir(slug) / filename
@@ -370,6 +374,11 @@ class GenerateRequest(BaseModel):
 @app.post("/api/themes/{slug}/generate")
 async def generate_theme(slug: str, body: GenerateRequest) -> dict:
     """Kick off a generation batch. Progress streams via /ws/status."""
+    if slug == IMPORTED_SLUG:
+        raise HTTPException(
+            status_code=400,
+            detail="'imported' is reserved for imported images and cannot be generated into",
+        )
     cfg = Config()
     cfg.validate()
 

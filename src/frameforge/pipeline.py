@@ -10,6 +10,7 @@ from .config import Config, slugify
 from .discover import DiscoveredTV, discover
 from .expander import expand_theme
 from .generator import generate_batch
+from .imports import IMPORTED_SLUG
 from .library import Library
 from .tv_client import FrameTVClient
 
@@ -40,6 +41,10 @@ def find_tv(cfg: Config) -> DiscoveredTV:
 def run_generate(cfg: Config, theme: str, count: int | None = None) -> Path:
     cfg.validate()
     slug = slugify(theme)
+    if slug == IMPORTED_SLUG:
+        raise RuntimeError(
+            "'imported' is reserved for imported images and cannot be generated into"
+        )
     out_dir = cfg.theme_dir(slug)
 
     console.print(f"[cyan]Expanding theme:[/cyan] {theme}")
