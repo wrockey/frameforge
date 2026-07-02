@@ -92,6 +92,7 @@ export function attachTilePointerHandlers(el, key, sel, openViewer) {
     openViewer();
   };
   el.onkeydown = (e) => {
+    if (e.target.closest("[data-act]")) return;
     if (e.key === "Enter") openViewer();
     if (e.key === " ") {
       e.preventDefault();

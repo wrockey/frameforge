@@ -406,7 +406,7 @@ function wireTvPanelButtons() {
     btn.textContent = "Removing…";
     try {
       const r = await api.tvDelete({ content_ids: ids });
-      tvView.selOnTv.clear();
+      onTvSel.clear();
       if (r.failed?.length) alert(`${r.failed.length} image(s) could not be removed.`);
     } catch (err) {
       alert(`Remove failed: ${tvActionError(err)}`);
@@ -430,7 +430,7 @@ function wireTvPanelButtons() {
         matte: tvView.matte,
         matte_color: tvView.matteColor,
       });
-      tvView.selLib.clear();
+      libSel.clear();
     } catch (err) {
       alert(`Upload failed: ${tvActionError(err)}`);
     }
